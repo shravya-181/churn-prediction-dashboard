@@ -24,6 +24,25 @@ def load_artifacts():
 
 model, scaler, kmeans, cluster_scaler, model_columns, cluster_columns, persona_info, df = load_artifacts()
 
+# Plain-English names for features (used in explanations)
+FEATURE_LABELS = {
+    "avg_quiz_score": "their average quiz score",
+    "video_replay_count": "how often they replay videos",
+    "course_completion_rate": "their course completion",
+    "days_since_last_login": "the days since their last login",
+    "engagement_trend": "their engagement trend",
+    "hands_on_exercises_completed": "the hands-on exercises they completed",
+    "project_submissions": "their project submissions",
+    "forum_posts": "their forum participation",
+    "goal_progress_score": "their progress toward their goal",
+    "tenure_months": "how long they have subscribed",
+    "payment_failures": "their payment failures",
+    "support_tickets_raised": "the support tickets they raised",
+    "satisfaction_score": "their satisfaction score",
+    "plan_type_Monthly": "being on a monthly plan",
+    "plan_type_Annual": "being on an annual plan",
+}
+
 # ---- Sidebar navigation ----
 page = st.sidebar.radio("Navigate", ["Overview", "Explore", "Predict", "Why?", "Retention Simulator"])
 
@@ -98,8 +117,87 @@ elif page == "Explore":
 
 # ============================ PREDICT ============================
 elif page == "Predict":
-    st.header("Predict")
-    st.write("This page will let you input a learner and get a risk score.")
+    st.header("Predict: how likely is this learner to leave?")
+    st.info("How to read this: describe a learner using the controls below. The risk updates instantly.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Learner profile")
+        occupation = st.selectbox("Occupation", ["Student", "Working Professional", "Career Switcher"])
+        goal = st.selectbox("Signup goal", ["Get a Job", "Certification", "Hobby"])
+        plan = st.selectbox("Plan type", ["Monthly", "Annual"])
+        discount = st.selectbox("Used a signup discount?", ["No", "Yes"])
+        tenure = st.slider("Months subscribed", 0, 24, 6)
+        payment_failures = st.slider("Payment failures", 0, 5, 0)
+        support_tickets = st.slider("Support tickets raised", 0, 8, 0)
+        satisfaction = st.slider("Satisfaction (1-5)", 1, 5, 3)
+
+    with col2:
+        st.subheader("Learning behaviour")
+        completion = st.slider("Course completion (%)", 0, 100, 50)
+        quiz = st.slider("Average quiz score", 0, 100, 65)
+        replays = st.slider("Video replays", 0, 15, 3)
+        days_login = st.slider("Days since last login", 0, 90, 7)
+        trend_choice = st.selectbox("Engagement trend", ["Declining", "Flat", "Improving"], index=1)
+        exercises = st.slider("Hands-on exercises completed", 0, 20, 4)
+        projects = st.slider("Project submissions", 0, 8, 1)
+        forum = st.slider("Forum posts", 0, 10, 1)
+        goal_progress = st.slider("Progress toward their goal (0-100)", 0, 100, 40)
+
+    trend_value = {"Declining": -1, "Flat": 0, "Improving": 1}[trend_choice]
+
+    # Build one row that matches the model's expected columns exactly
+    row = {c: 0 for c in model_columns}
+    row.update({
+        "avg_quiz_score": quiz,
+        "video_replay_count": replays,
+        "course_completion_rate": completion,
+        "days_since_last_login": days_login,
+        "engagement_trend": trend_value,
+        "hands_on_exercises_completed": exercises,
+        "project_submissions": projects,
+        "forum_posts": forum,
+        "goal_progress_score": goal_progress,
+        "tenure_months": tenure,
+        "payment_failures": payment_failures,
+        "support_tickets_raised": support_tickets,
+        "satisfaction_score": satisfaction,
+    })
+    for key in [f"occupation_type_{occupation}", f"signup_goal_{goal}",
+                f"plan_type_{plan}", f"signup_discount_used_{discount}"]:
+        if key in row:
+            row[key] = 1
+
+    input_df = pd.DataFrame([row], columns=model_columns)
+    input_scaled = scaler.transform(input_df)
+    risk = model.predict_proba(input_scaled)[0, 1]
+
+    st.divider()
+    st.subheader("Result")
+    st.metric("Churn risk", f"{risk * 100:.1f}%")
+
+    if risk < 0.3:
+        st.success("🟢 Low risk: this learner is likely to stay. No action needed, a friendly 'keep it up' message is enough.")
+    elif risk < 0.7:
+        st.warning("🟡 Medium risk: this learner needs attention. Try a check-in email or a personalised course suggestion.")
+    else:
+        st.error("🔴 High risk: this learner is likely to leave. Act now with personal outreach or a win-back offer.")
+
+    # Plain-English reasons (for a linear model, contribution = coefficient x scaled value)
+    contrib = pd.Series(model.coef_[0] * input_scaled[0], index=model_columns)
+    contrib = contrib[[c for c in contrib.index if c in FEATURE_LABELS]]
+    risk_drivers = contrib[contrib > 0].sort_values(ascending=False).head(3)
+    protectors = contrib[contrib < 0].sort_values().head(2)
+
+    if len(risk_drivers) > 0:
+        names = [FEATURE_LABELS[c] for c in risk_drivers.index]
+        st.write("**Biggest reasons for risk:** " + ", ".join(names) + ".")
+    if len(protectors) > 0:
+        names = [FEATURE_LABELS[c] for c in protectors.index]
+        st.write("**What is helping keep them:** " + ", ".join(names) + ".")
+
+    st.caption("Note: the model is tuned to catch as many churners as possible, so its percentages run higher than real-world churn rates. Use them to rank learners, not as exact probabilities.")
 
 # ============================== WHY? ==============================
 elif page == "Why?":
