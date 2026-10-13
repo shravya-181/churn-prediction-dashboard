@@ -61,6 +61,42 @@ SHORT_LABELS = {
     "plan_type_Monthly": "Monthly plan (vs annual)",
 }
 
+# ---- Helper functions ----
+def tier_label(r):
+    if r < 0.3:
+        return "🟢 Low"
+    elif r < 0.7:
+        return "🟡 Medium"
+    return "🔴 High"
+
+def learner_risk(learner, overrides=None):
+    """Churn risk (0-1) for one learner row from df, with optional changed values."""
+    overrides = overrides or {}
+    row = {c: 0 for c in model_columns}
+    for c in model_columns:
+        if c in learner.index:
+            row[c] = learner[c]
+    for key in [f"occupation_type_{learner['occupation_type']}",
+                f"signup_goal_{learner['signup_goal']}",
+                f"plan_type_{learner['plan_type']}",
+                f"signup_discount_used_{learner['signup_discount_used']}"]:
+        if key in row:
+            row[key] = 1
+    for c, v in overrides.items():
+        row[c] = v
+    input_df = pd.DataFrame([row], columns=model_columns).astype(float)
+    return model.predict_proba(scaler.transform(input_df))[0, 1]
+
+@st.cache_data
+def score_all_learners():
+    """Churn risk (0-1) for every learner in the dataset."""
+    X_all = pd.get_dummies(
+        df.drop(columns=['churned', 'days_to_churn']),
+        columns=['occupation_type', 'signup_goal', 'plan_type', 'signup_discount_used'],
+    )
+    X_all = X_all.reindex(columns=model_columns, fill_value=0).astype(float)
+    return model.predict_proba(scaler.transform(X_all))[:, 1]
+
 # ---- Sidebar navigation ----
 page = st.sidebar.radio("Navigate", ["Overview", "Explore", "Predict", "Why?", "Retention Simulator"])
 
@@ -318,5 +354,138 @@ elif page == "Why?":
 
 # ======================= RETENTION SIMULATOR =======================
 elif page == "Retention Simulator":
-    st.header("Retention Simulator")
-    st.write("This page will show the ROI simulator.")
+    st.header("Retention Simulator: is a retention campaign worth it?")
+    st.info("How to read this: set the campaign assumptions, and see how much money a targeted retention campaign could protect.")
+
+    risk_all = score_all_learners()
+
+    # ---------------- Part 1: Campaign ROI ----------------
+    st.subheader("1. Campaign ROI")
+
+    s1, s2, s3 = st.columns(3)
+    offer_cost = s1.slider("Cost per retention offer ($)", 1, 50, 8)
+    success_rate = s2.slider("Offer success rate (%)", 5, 80, 35) / 100
+    target_pct = s3.slider("Share of at-risk learners to target (%)", 5, 100, 20)
+
+    p1, p2 = st.columns(2)
+    monthly_price = p1.number_input("Monthly plan price ($ per month)", min_value=1, max_value=100, value=15)
+    annual_price = p2.number_input("Annual plan price ($ per month equivalent)", min_value=1, max_value=100, value=10)
+
+    biz = df[['plan_type', 'tenure_months']].copy()
+    biz['risk'] = risk_all
+    biz['price'] = biz['plan_type'].map({'Monthly': monthly_price, 'Annual': annual_price})
+    biz['clv'] = biz['price'] * (biz['tenure_months'] + 1)
+
+    at_risk_df = biz[biz['risk'] >= 0.3].copy()
+
+    if len(at_risk_df) == 0:
+        st.warning("No at-risk learners found.")
+        st.stop()
+
+    # Prioritise by risk x value: save the most valuable, most likely leavers first
+    at_risk_df['priority'] = at_risk_df['risk'] * at_risk_df['clv']
+    at_risk_df = at_risk_df.sort_values('priority', ascending=False)
+
+    n_target = max(1, int(len(at_risk_df) * target_pct / 100))
+    targeted = at_risk_df.head(n_target)
+
+    campaign_cost = n_target * offer_cost
+    revenue_saved = (targeted['clv'] * success_rate).sum()
+    net_value = revenue_saved - campaign_cost
+    roi = net_value / campaign_cost * 100
+    do_nothing_loss = (at_risk_df['clv'] * at_risk_df['risk']).sum()
+    loss_with_campaign = max(do_nothing_loss - revenue_saved, 0)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("At-risk learners", f"{len(at_risk_df):,}")
+    k2.metric("Learners targeted", f"{n_target:,}")
+    k3.metric("Campaign cost", f"${campaign_cost:,.0f}")
+    k4.metric("ROI", f"{roi:,.0f}%")
+
+    k5, k6 = st.columns(2)
+    k5.metric("Expected revenue saved", f"${revenue_saved:,.0f}")
+    k6.metric("Net value (saved minus cost)", f"${net_value:,.0f}")
+
+    compare_chart = pd.DataFrame(
+        {"Dollars ($)": [do_nothing_loss, loss_with_campaign, campaign_cost]},
+        index=["Revenue lost: do nothing", "Revenue lost: run campaign", "Campaign cost"],
+    )
+    st.bar_chart(compare_chart)
+
+    if net_value > 0:
+        st.success(
+            f"Takeaway: spending ${campaign_cost:,.0f} on {n_target} learners could protect about "
+            f"${revenue_saved:,.0f} in revenue, compared with ${do_nothing_loss:,.0f} at risk if the company does nothing."
+        )
+    else:
+        st.warning(
+            f"Takeaway: with these settings the campaign costs ${campaign_cost:,.0f} but saves only "
+            f"${revenue_saved:,.0f}. Try targeting fewer learners or a cheaper offer."
+        )
+
+    with st.expander("Who would we target first? (top 10)"):
+        top10 = targeted.head(10).copy()
+        show = pd.DataFrame({
+            "Plan": top10['plan_type'],
+            "Months subscribed": top10['tenure_months'],
+            "Churn risk (%)": (top10['risk'] * 100).round(1),
+            "Lifetime value ($)": top10['clv'].round(0),
+        })
+        st.dataframe(show, use_container_width=True)
+
+    st.caption(
+        "Simplified model: learners are ranked by churn risk x lifetime value, and every targeted learner "
+        "is assumed to be worth saving. Real savings would be lower."
+    )
+
+    # ---------------- Part 2: What-if ----------------
+    st.divider()
+    st.subheader("2. What-if: what if we help one learner improve?")
+    st.info("How to read this: pick a learner, change one thing, and see how their churn risk changes.")
+
+    pool = np.where(risk_all >= 0.3)[0]
+    start_pool = np.where(risk_all >= 0.5)[0]
+
+    if "wi_idx" not in st.session_state:
+        st.session_state["wi_idx"] = int(start_pool[0]) if len(start_pool) else 0
+
+    w1, w2 = st.columns([1, 3])
+    if w1.button("Pick a random at-risk learner", key="wi_random"):
+        st.session_state["wi_idx"] = int(np.random.choice(pool))
+    wi_idx = int(w2.number_input(f"Or enter a learner number (0 to {len(df) - 1})",
+                                 min_value=0, max_value=len(df) - 1, step=1, key="wi_idx"))
+
+    learner = df.iloc[wi_idx]
+
+    FACTORS = {
+        "Course completion (%)": ("course_completion_rate", 0, 100),
+        "Hands-on exercises completed": ("hands_on_exercises_completed", 0, 20),
+        "Days since last login": ("days_since_last_login", 0, 90),
+        "Satisfaction (1-5)": ("satisfaction_score", 1, 5),
+        "Project submissions": ("project_submissions", 0, 8),
+        "Forum posts": ("forum_posts", 0, 10),
+        "Support tickets raised": ("support_tickets_raised", 0, 8),
+    }
+    factor_label = st.selectbox("Change this:", list(FACTORS.keys()), key="wi_factor")
+    col_name, lo, hi = FACTORS[factor_label]
+    current = int(np.clip(round(float(learner[col_name])), lo, hi))
+    new_val = st.slider(f"New value (currently {current})", lo, hi, current,
+                        key=f"wi_{col_name}_{wi_idx}")
+
+    before = learner_risk(learner, {col_name: current})
+    after = learner_risk(learner, {col_name: new_val})
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Risk before", f"{before * 100:.1f}%")
+    r2.metric("Risk after", f"{after * 100:.1f}%",
+              delta=f"{(after - before) * 100:+.1f} points", delta_color="inverse")
+    r3.metric("Risk level", f"{tier_label(before)} → {tier_label(after)}")
+
+    if after < before:
+        st.success(f"Takeaway: changing '{factor_label}' from {current} to {new_val} lowers this learner's risk by {(before - after) * 100:.1f} points.")
+    elif after > before:
+        st.warning(f"Takeaway: changing '{factor_label}' from {current} to {new_val} raises this learner's risk by {(after - before) * 100:.1f} points.")
+    else:
+        st.info("Move the slider to see how the risk changes.")
+
+    st.caption("Only one factor changes at a time. In real life, factors move together (a learner who completes more courses usually also does more exercises).")
