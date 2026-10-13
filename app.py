@@ -43,6 +43,24 @@ FEATURE_LABELS = {
     "plan_type_Annual": "being on an annual plan",
 }
 
+# Short names for charts
+SHORT_LABELS = {
+    "avg_quiz_score": "Quiz score",
+    "video_replay_count": "Video replays",
+    "course_completion_rate": "Course completion",
+    "days_since_last_login": "Days since last login",
+    "engagement_trend": "Engagement trend",
+    "hands_on_exercises_completed": "Hands-on exercises",
+    "project_submissions": "Project submissions",
+    "forum_posts": "Forum posts",
+    "goal_progress_score": "Goal progress",
+    "tenure_months": "Months subscribed",
+    "payment_failures": "Payment failures",
+    "support_tickets_raised": "Support tickets",
+    "satisfaction_score": "Satisfaction",
+    "plan_type_Monthly": "Monthly plan (vs annual)",
+}
+
 # ---- Sidebar navigation ----
 page = st.sidebar.radio("Navigate", ["Overview", "Explore", "Predict", "Why?", "Retention Simulator"])
 
@@ -201,8 +219,102 @@ elif page == "Predict":
 
 # ============================== WHY? ==============================
 elif page == "Why?":
-    st.header("Why?")
-    st.write("This page will show SHAP explanations.")
+    st.header("Why do learners leave?")
+    st.info("How to read this: the first chart shows what matters most across ALL learners. The second explains ONE learner.")
+
+    # ---- Part 1: overall drivers ----
+    st.subheader("1. The biggest drivers of churn overall")
+    coefs = pd.Series(model.coef_[0], index=model_columns)
+    coefs = coefs[[c for c in coefs.index if c in SHORT_LABELS]]
+    top = coefs.reindex(coefs.abs().sort_values(ascending=False).index).head(10)
+    chart = pd.DataFrame(
+        {"Effect on churn risk (above 0 = raises risk, below 0 = lowers risk)": top.values},
+        index=[SHORT_LABELS[c] for c in top.index],
+    )
+    st.bar_chart(chart)
+
+    top_name = SHORT_LABELS[top.index[0]]
+    top_dir = "lowers" if top.iloc[0] < 0 else "raises"
+    risk_names = [SHORT_LABELS[c] for c in top.index if top[c] > 0][:3]
+    st.success(
+        f"Takeaway: '{top_name}' matters most, and a higher value {top_dir} churn risk. "
+        f"The strongest warning signs are: {', '.join(risk_names)}."
+    )
+
+    # ---- Part 2: explain one learner ----
+    st.divider()
+    st.subheader("2. Explain one learner")
+
+    if "learner_idx" not in st.session_state:
+        st.session_state["learner_idx"] = 0
+
+    b1, b2 = st.columns([1, 3])
+    if b1.button("Pick a random learner"):
+        st.session_state["learner_idx"] = int(np.random.randint(0, len(df)))
+    idx = b2.number_input(f"Or enter a learner number (0 to {len(df) - 1})",
+                          min_value=0, max_value=len(df) - 1, step=1, key="learner_idx")
+
+    learner = df.iloc[int(idx)]
+
+    # Build the model row for this learner
+    row = {c: 0 for c in model_columns}
+    for c in model_columns:
+        if c in learner.index:
+            row[c] = learner[c]
+    for key in [f"occupation_type_{learner['occupation_type']}",
+                f"signup_goal_{learner['signup_goal']}",
+                f"plan_type_{learner['plan_type']}",
+                f"signup_discount_used_{learner['signup_discount_used']}"]:
+        if key in row:
+            row[key] = 1
+
+    input_df = pd.DataFrame([row], columns=model_columns).astype(float)
+    input_scaled = scaler.transform(input_df)
+    risk = model.predict_proba(input_scaled)[0, 1]
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Churn risk", f"{risk * 100:.1f}%")
+    m2.metric("Course completion", f"{learner['course_completion_rate']:.0f}%")
+    m3.metric("Days since last login", f"{int(learner['days_since_last_login'])}")
+    m4.metric("Actually churned?", "Yes" if learner['churned'] == 1 else "No")
+
+    if risk < 0.3:
+        st.success("🟢 Low risk")
+    elif risk < 0.7:
+        st.warning("🟡 Medium risk")
+    else:
+        st.error("🔴 High risk")
+
+    # Reasons for this learner (linear model: contribution = coefficient x scaled value)
+    contrib = pd.Series(model.coef_[0] * input_scaled[0], index=model_columns)
+    contrib = contrib[[c for c in contrib.index if c in SHORT_LABELS]]
+    top_contrib = contrib.reindex(contrib.abs().sort_values(ascending=False).index).head(6)
+    contrib_chart = pd.DataFrame(
+        {"Push on risk (above 0 = toward leaving, below 0 = toward staying)": top_contrib.values},
+        index=[SHORT_LABELS[c] for c in top_contrib.index],
+    )
+    st.bar_chart(contrib_chart)
+
+    up = [FEATURE_LABELS.get(c, c) for c in contrib[contrib > 0].sort_values(ascending=False).head(3).index]
+    down = [FEATURE_LABELS.get(c, c) for c in contrib[contrib < 0].sort_values().head(2).index]
+    summary = f"This learner has a {risk * 100:.0f}% churn risk."
+    if up:
+        summary += f" The biggest reasons are {', '.join(up)}."
+    if down:
+        summary += f" Helping keep them: {', '.join(down)}."
+    st.write(summary)
+
+    # Persona (personas were built for at-risk learners, so only show for medium/high risk)
+    if risk >= 0.3:
+        cluster_input = pd.DataFrame([learner[cluster_columns].astype(float)])
+        cluster_id = int(kmeans.predict(cluster_scaler.transform(cluster_input))[0])
+        info = persona_info[str(cluster_id)]
+        st.subheader(f"Persona: {info['name']}")
+        st.write(f"**Recommended action:** {info['action']}")
+    else:
+        st.caption("Personas only apply to learners at medium or high risk.")
+
+    st.caption("Note: the model is tuned to catch as many churners as possible, so its percentages run higher than real-world churn rates. Use them to rank learners, not as exact probabilities.")
 
 # ======================= RETENTION SIMULATOR =======================
 elif page == "Retention Simulator":
