@@ -866,6 +866,11 @@ Tip: download the template below, replace the rows with your own learners, and u
         "Biggest risk factor": reasons,
         "Persona": personas,
         "Recommended action": actions,
+        "Days since last login": clean["days_since_last_login"].astype(int).values,
+        "Course completion (%)": clean["course_completion_rate"].round(0).astype(int).values,
+        "Satisfaction (1-5)": clean["satisfaction_score"].astype(int).values,
+        "Engagement trend": clean["engagement_trend"].map({-1: "Declining", 0: "Flat", 1: "Improving"}).values,
+        "Plan": clean["plan_type"].values,
     }).sort_values("Churn risk (%)", ascending=False).reset_index(drop=True)
 
     # ---- Show the results ----
@@ -891,9 +896,12 @@ Tip: download the template below, replace the rows with your own learners, and u
 
     st.dataframe(results, use_container_width=True)
 
+    # Excel-friendly download: plain words instead of emoji, and a marker so Excel reads it correctly
+    csv_df = results.copy()
+    csv_df["Risk level"] = csv_df["Risk level"].str.replace(r"[^\x00-\x7F]+", "", regex=True).str.strip()
     st.download_button(
         "⬇ Download results as CSV",
-        results.to_csv(index=False).encode("utf-8"),
+        csv_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="churn_risk_results.csv",
         mime="text/csv",
     )
