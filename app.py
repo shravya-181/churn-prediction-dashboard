@@ -61,6 +61,61 @@ SHORT_LABELS = {
     "plan_type_Monthly": "Monthly plan (vs annual)",
 }
 
+# ---- Predict page: starting values and example learners ----
+PRED_DEFAULTS = {
+    "pr_occ": "Student", "pr_goal": "Get a Job", "pr_plan": "Monthly", "pr_disc": "No",
+    "pr_tenure": 6, "pr_pf": 0, "pr_tickets": 0, "pr_sat": 3,
+    "pr_comp": 50, "pr_quiz": 65, "pr_replays": 3, "pr_days": 7, "pr_trend": "Flat",
+    "pr_ex": 4, "pr_proj": 1, "pr_forum": 1, "pr_gp": 40,
+}
+
+EXAMPLES = {
+    "👻 The Ghost": {
+        "story": "Signed up with a discount, barely started, and has not logged in for five weeks.",
+        "values": {
+            "pr_occ": "Student", "pr_goal": "Hobby", "pr_plan": "Monthly", "pr_disc": "Yes",
+            "pr_tenure": 2, "pr_pf": 1, "pr_tickets": 0, "pr_sat": 2,
+            "pr_comp": 15, "pr_quiz": 55, "pr_replays": 4, "pr_days": 35, "pr_trend": "Declining",
+            "pr_ex": 0, "pr_proj": 0, "pr_forum": 0, "pr_gp": 15,
+        },
+    },
+    "😣 The Struggler": {
+        "story": "Keeps replaying videos, fails quizzes, raises support tickets, but is still trying.",
+        "values": {
+            "pr_occ": "Working Professional", "pr_goal": "Certification", "pr_plan": "Monthly", "pr_disc": "No",
+            "pr_tenure": 4, "pr_pf": 0, "pr_tickets": 3, "pr_sat": 2,
+            "pr_comp": 25, "pr_quiz": 45, "pr_replays": 9, "pr_days": 10, "pr_trend": "Declining",
+            "pr_ex": 1, "pr_proj": 0, "pr_forum": 2, "pr_gp": 20,
+        },
+    },
+    "🏆 The Champion": {
+        "story": "Annual plan, finishing courses, doing projects, active in the forum, and happy.",
+        "values": {
+            "pr_occ": "Career Switcher", "pr_goal": "Get a Job", "pr_plan": "Annual", "pr_disc": "No",
+            "pr_tenure": 14, "pr_pf": 0, "pr_tickets": 0, "pr_sat": 5,
+            "pr_comp": 90, "pr_quiz": 88, "pr_replays": 1, "pr_days": 1, "pr_trend": "Improving",
+            "pr_ex": 14, "pr_proj": 4, "pr_forum": 5, "pr_gp": 85,
+        },
+    },
+    "🤫 The Quiet Achiever": {
+        "story": "Great scores and completion, but has gone quiet for four weeks. Will the model worry?",
+        "values": {
+            "pr_occ": "Working Professional", "pr_goal": "Certification", "pr_plan": "Annual", "pr_disc": "No",
+            "pr_tenure": 10, "pr_pf": 0, "pr_tickets": 0, "pr_sat": 4,
+            "pr_comp": 88, "pr_quiz": 82, "pr_replays": 1, "pr_days": 28, "pr_trend": "Declining",
+            "pr_ex": 9, "pr_proj": 2, "pr_forum": 1, "pr_gp": 60,
+        },
+    },
+}
+
+def load_example(name):
+    for k, v in EXAMPLES[name]["values"].items():
+        st.session_state[k] = v
+
+def reset_learner():
+    for k, v in PRED_DEFAULTS.items():
+        st.session_state[k] = v
+
 # ---- Sidebar: navigation + currency ----
 page = st.sidebar.radio(
     "Navigate",
@@ -156,7 +211,7 @@ because real platforms do not publish their customer data. The patterns are real
             """
 - **Overview:** the big numbers and the biggest patterns at a glance
 - **Explore:** compare groups and behaviours, and see what separates learners who stay from those who leave
-- **Predict:** describe any learner and get their risk (🟢 low, 🟡 medium, 🔴 high)
+- **Predict:** describe any learner (or load an example) and get their risk (🟢 low, 🟡 medium, 🔴 high)
             """
         )
     with b:
@@ -173,8 +228,8 @@ because real platforms do not publish their customer data. The patterns are real
     with st.expander("Experiment 1: Spot the warning signs (Predict page)"):
         st.markdown(
             """
-1. Open **Predict** and leave everything at its starting values. Note the risk.
-2. Set **Engagement trend** to *Declining* and **Days since last login** to *30*. What happens to the risk?
+1. Open **Predict** and click an example learner at the top, like **The Champion**, then **The Ghost**. Compare the risk.
+2. Click **Reset** and set **Engagement trend** to *Declining* and **Days since last login** to *30*. What happens to the risk?
 3. Now set **Course completion** to *90* and **Satisfaction** to *5*. Does the risk recover?
 
 *What you learn:* no single signal decides churn. Many small signals add up.
@@ -204,7 +259,7 @@ because real platforms do not publish their customer data. The patterns are real
 
     with st.expander("Experiment 4: Is a campaign worth the money? (Retention Simulator)"):
         st.markdown(
-            f"""
+            """
 1. In **Retention Simulator**, set the offer cost to the maximum and the success rate to 5%.
 2. Watch the ROI turn negative. Now move the sliders back and target fewer learners.
 
@@ -306,32 +361,47 @@ elif page == "Explore":
 # ============================ PREDICT ============================
 elif page == "Predict":
     st.header("Predict: how likely is this learner to leave?")
-    st.info("How to read this: describe a learner using the controls below. The risk updates instantly.")
+    st.info("How to read this: load an example learner or set the controls yourself. The risk updates instantly.")
+
+    # Make sure every control has a starting value (only the first time)
+    for k, v in PRED_DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    st.subheader("Quick start: load an example learner")
+    ex_cols = st.columns(len(EXAMPLES) + 1)
+    for col, name in zip(ex_cols, EXAMPLES.keys()):
+        col.button(name, on_click=load_example, args=(name,), use_container_width=True)
+    ex_cols[-1].button("↺ Reset", on_click=reset_learner, use_container_width=True)
+
+    with st.expander("Who are these example learners?"):
+        for name, ex in EXAMPLES.items():
+            st.write(f"**{name}:** {ex['story']}")
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("Learner profile")
-        occupation = st.selectbox("Occupation", ["Student", "Working Professional", "Career Switcher"])
-        goal = st.selectbox("Signup goal", ["Get a Job", "Certification", "Hobby"])
-        plan = st.selectbox("Plan type", ["Monthly", "Annual"])
-        discount = st.selectbox("Used a signup discount?", ["No", "Yes"])
-        tenure = st.slider("Months subscribed", 0, 24, 6)
-        payment_failures = st.slider("Payment failures", 0, 5, 0)
-        support_tickets = st.slider("Support tickets raised", 0, 8, 0)
-        satisfaction = st.slider("Satisfaction (1-5)", 1, 5, 3)
+        occupation = st.selectbox("Occupation", ["Student", "Working Professional", "Career Switcher"], key="pr_occ")
+        goal = st.selectbox("Signup goal", ["Get a Job", "Certification", "Hobby"], key="pr_goal")
+        plan = st.selectbox("Plan type", ["Monthly", "Annual"], key="pr_plan")
+        discount = st.selectbox("Used a signup discount?", ["No", "Yes"], key="pr_disc")
+        tenure = st.slider("Months subscribed", 0, 24, key="pr_tenure")
+        payment_failures = st.slider("Payment failures", 0, 5, key="pr_pf")
+        support_tickets = st.slider("Support tickets raised", 0, 8, key="pr_tickets")
+        satisfaction = st.slider("Satisfaction (1-5)", 1, 5, key="pr_sat")
 
     with col2:
         st.subheader("Learning behaviour")
-        completion = st.slider("Course completion (%)", 0, 100, 50)
-        quiz = st.slider("Average quiz score", 0, 100, 65)
-        replays = st.slider("Video replays", 0, 15, 3)
-        days_login = st.slider("Days since last login", 0, 90, 7)
-        trend_choice = st.selectbox("Engagement trend", ["Declining", "Flat", "Improving"], index=1)
-        exercises = st.slider("Hands-on exercises completed", 0, 20, 4)
-        projects = st.slider("Project submissions", 0, 8, 1)
-        forum = st.slider("Forum posts", 0, 10, 1)
-        goal_progress = st.slider("Progress toward their goal (0-100)", 0, 100, 40)
+        completion = st.slider("Course completion (%)", 0, 100, key="pr_comp")
+        quiz = st.slider("Average quiz score", 0, 100, key="pr_quiz")
+        replays = st.slider("Video replays", 0, 15, key="pr_replays")
+        days_login = st.slider("Days since last login", 0, 90, key="pr_days")
+        trend_choice = st.selectbox("Engagement trend", ["Declining", "Flat", "Improving"], key="pr_trend")
+        exercises = st.slider("Hands-on exercises completed", 0, 20, key="pr_ex")
+        projects = st.slider("Project submissions", 0, 8, key="pr_proj")
+        forum = st.slider("Forum posts", 0, 10, key="pr_forum")
+        goal_progress = st.slider("Progress toward their goal (0-100)", 0, 100, key="pr_gp")
 
     trend_value = {"Declining": -1, "Flat": 0, "Improving": 1}[trend_choice]
 
