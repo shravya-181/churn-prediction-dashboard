@@ -119,7 +119,7 @@ def reset_learner():
 # ---- Sidebar: navigation + currency ----
 page = st.sidebar.radio(
     "Navigate",
-    ["Start Here", "Overview", "Explore", "Predict", "Why?", "Retention Simulator"],
+    ["Start Here", "Overview", "Explore", "Predict", "Why?", "Retention Simulator", "Try Your Own Data"],
 )
 
 currency_choice = st.sidebar.selectbox("Currency", ["₹ Indian Rupee", "$ US Dollar"])
@@ -219,6 +219,7 @@ because real platforms do not publish their customer data. The patterns are real
             """
 - **Why?:** what drives churn overall, and the reasons behind one learner's risk, plus their persona
 - **Retention Simulator:** how much money a retention campaign could save, and a what-if tool for one learner
+- **Try Your Own Data:** upload a CSV of learners and get every learner's risk, reason and persona
             """
         )
 
@@ -264,6 +265,16 @@ because real platforms do not publish their customer data. The patterns are real
 2. Watch the ROI turn negative. Now move the sliders back and target fewer learners.
 
 *What you learn:* targeting the right learners is what makes a retention campaign pay off.
+            """
+        )
+
+    with st.expander("Experiment 5: Score a whole list of learners (Try Your Own Data)"):
+        st.markdown(
+            """
+1. Open **Try Your Own Data** and use the sample file. Look at the learners sorted by risk.
+2. Download the CSV template, change a few values in a spreadsheet, and upload it back.
+
+*What you learn:* how a retention team could get a weekly "who to contact first" list.
             """
         )
 
@@ -695,3 +706,199 @@ elif page == "Retention Simulator":
         st.info("Move the slider to see how the risk changes.")
 
     st.caption("Only one factor changes at a time. In real life, factors move together (a learner who completes more courses usually also does more exercises).")
+
+# ======================= TRY YOUR OWN DATA =======================
+elif page == "Try Your Own Data":
+    st.header("Try your own data: score a whole list of learners")
+    st.info("How to read this: upload a CSV of learners (or use the sample file) and get each learner's risk level, biggest risk factor, persona and recommended action. You can download the results.")
+
+    CAT_ALLOWED = {
+        "occupation_type": ["Student", "Working Professional", "Career Switcher"],
+        "signup_goal": ["Get a Job", "Certification", "Hobby"],
+        "plan_type": ["Monthly", "Annual"],
+        "signup_discount_used": ["Yes", "No"],
+    }
+    NUM_COLS = [
+        "avg_quiz_score", "video_replay_count", "course_completion_rate", "days_since_last_login",
+        "hands_on_exercises_completed", "project_submissions", "forum_posts", "goal_progress_score",
+        "tenure_months", "payment_failures", "support_tickets_raised", "satisfaction_score",
+    ]
+    RAW_COLS = list(CAT_ALLOWED.keys()) + ["engagement_trend"] + NUM_COLS
+
+    # A ready-made sample of 50 learners (and the template is its first 5 rows)
+    sample_df = df.sample(50, random_state=3)[RAW_COLS].reset_index(drop=True)
+    sample_df.insert(0, "learner_id", [f"L{i + 1:03d}" for i in range(len(sample_df))])
+    template_df = sample_df.head(5)
+
+    with st.expander("What columns does my file need?"):
+        st.markdown(
+            """
+Your CSV needs one row per learner and these columns (column names are not case sensitive; an optional
+`learner_id` column is kept so you can recognise each learner):
+
+- **occupation_type:** Student, Working Professional or Career Switcher
+- **signup_goal:** Get a Job, Certification or Hobby
+- **plan_type:** Monthly or Annual
+- **signup_discount_used:** Yes or No
+- **engagement_trend:** Declining, Flat or Improving (or -1, 0, 1)
+- **Numbers:** avg_quiz_score, video_replay_count, course_completion_rate, days_since_last_login,
+  hands_on_exercises_completed, project_submissions, forum_posts, goal_progress_score, tenure_months,
+  payment_failures, support_tickets_raised, satisfaction_score
+
+Tip: download the template below, replace the rows with your own learners, and upload it.
+            """
+        )
+
+    st.download_button(
+        "⬇ Download CSV template",
+        template_df.to_csv(index=False).encode("utf-8"),
+        file_name="learner_template.csv",
+        mime="text/csv",
+    )
+
+    source = st.radio("Choose your data", ["Use the sample file (50 learners)", "Upload my own CSV"], horizontal=True)
+
+    raw = None
+    if source.startswith("Use"):
+        raw = sample_df.copy()
+    else:
+        up_file = st.file_uploader("Upload a CSV file", type=["csv"])
+        if up_file is not None:
+            try:
+                raw = pd.read_csv(up_file)
+            except Exception:
+                st.error("Sorry, that file could not be read as a CSV. Try downloading the template and starting from it.")
+
+    if raw is None:
+        st.stop()
+
+    if len(raw) > 5000:
+        st.warning("Your file has more than 5,000 rows, so only the first 5,000 are scored.")
+        raw = raw.head(5000)
+
+    # Make column names forgiving: "Plan Type" and "plan_type" both work
+    raw.columns = [str(c).strip().lower().replace(" ", "_") for c in raw.columns]
+
+    missing = [c for c in RAW_COLS if c not in raw.columns]
+    if missing:
+        st.error("Your file is missing these columns: " + ", ".join(missing) + ". Download the template to see the format.")
+        st.stop()
+
+    ids = raw["learner_id"].astype(str) if "learner_id" in raw.columns else pd.Series(range(1, len(raw) + 1), index=raw.index).astype(str)
+
+    clean = raw[RAW_COLS].copy()
+
+    # Text columns: tidy up spelling/case, mark unknown values as missing
+    for col, allowed in CAT_ALLOWED.items():
+        canon = {v.lower(): v for v in allowed}
+        clean[col] = clean[col].astype(str).str.strip().str.lower().map(canon)
+
+    # Engagement trend: accept -1/0/1 or the words
+    trend_raw = raw["engagement_trend"]
+    trend_num = pd.to_numeric(trend_raw, errors="coerce")
+    trend_txt = trend_raw.astype(str).str.strip().str.lower().map({"declining": -1, "flat": 0, "improving": 1})
+    clean["engagement_trend"] = trend_num.where(trend_num.notna(), trend_txt)
+    clean.loc[~clean["engagement_trend"].isin([-1, 0, 1]), "engagement_trend"] = np.nan
+
+    # Number columns
+    for col in NUM_COLS:
+        clean[col] = pd.to_numeric(clean[col], errors="coerce")
+
+    # Drop rows with anything missing or invalid
+    bad_rows = clean.isna().any(axis=1)
+    n_bad = int(bad_rows.sum())
+    if n_bad > 0:
+        st.warning(f"{n_bad} row(s) had a missing or invalid value and were skipped.")
+    clean = clean[~bad_rows].copy()
+    ids_clean = ids[~bad_rows]
+
+    if len(clean) == 0:
+        st.error("None of the rows could be scored. Check the allowed values and try again.")
+        st.stop()
+
+    # Keep numbers inside the range the model was trained on
+    n_clipped = 0
+    for col in NUM_COLS:
+        lo, hi = df[col].min(), df[col].max()
+        clipped = clean[col].clip(lo, hi)
+        n_clipped += int((clipped != clean[col]).sum())
+        clean[col] = clipped
+    if n_clipped > 0:
+        st.caption(f"{n_clipped} value(s) were outside the range the model was trained on and were limited to that range.")
+
+    # ---- Score every learner ----
+    X_up = pd.get_dummies(clean[RAW_COLS], columns=list(CAT_ALLOWED.keys()))
+    X_up = X_up.reindex(columns=model_columns, fill_value=0).astype(float)
+    X_scaled = scaler.transform(X_up)
+    risk_up = model.predict_proba(X_scaled)[:, 1]
+
+    # Biggest risk factor per learner (linear model: coefficient x scaled value)
+    contrib = pd.DataFrame(X_scaled * model.coef_[0], columns=model_columns)
+    contrib = contrib[[c for c in model_columns if c in SHORT_LABELS]]
+    top_col = contrib.idxmax(axis=1)
+    top_val = contrib.max(axis=1)
+
+    # Persona (peer percentile is measured against the original 3,000 learners)
+    ref_sorted = np.sort(df["course_completion_rate"].values)
+    peer = np.searchsorted(ref_sorted, clean["course_completion_rate"].values, side="right") / len(ref_sorted) * 100
+    cl_in = clean[[c for c in cluster_columns if c != "peer_completion_percentile"]].copy()
+    cl_in["peer_completion_percentile"] = peer
+    cl_in = cl_in[cluster_columns].astype(float)
+    cluster_ids = kmeans.predict(cluster_scaler.transform(cl_in))
+
+    levels, reasons, personas, actions = [], [], [], []
+    for r, c, v, cid in zip(risk_up, top_col, top_val, cluster_ids):
+        levels.append(tier_label(r))
+        if r >= 0.3:
+            reasons.append(SHORT_LABELS[c] if v > 0 else "-")
+            info = persona_info[str(int(cid))]
+            personas.append(info["name"])
+            actions.append(info["action"])
+        else:
+            reasons.append("-")
+            personas.append("-")
+            actions.append("No action needed")
+
+    results = pd.DataFrame({
+        "Learner": ids_clean.values,
+        "Churn risk (%)": (risk_up * 100).round(1),
+        "Risk level": levels,
+        "Biggest risk factor": reasons,
+        "Persona": personas,
+        "Recommended action": actions,
+    }).sort_values("Churn risk (%)", ascending=False).reset_index(drop=True)
+
+    # ---- Show the results ----
+    st.divider()
+    st.subheader("Results")
+
+    order = ["🟢 Low", "🟡 Medium", "🔴 High"]
+    counts = results["Risk level"].value_counts().reindex(order, fill_value=0)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Learners scored", f"{len(results):,}")
+    m2.metric("🔴 High risk", f"{int(counts['🔴 High']):,}")
+    m3.metric("🟡 Medium risk", f"{int(counts['🟡 Medium']):,}")
+    m4.metric("🟢 Low risk", f"{int(counts['🟢 Low']):,}")
+
+    st.bar_chart(counts)
+
+    n_act = int(counts["🔴 High"] + counts["🟡 Medium"])
+    st.success(
+        f"Takeaway: {n_act} of {len(results)} learners ({n_act / len(results) * 100:.0f}%) need attention. "
+        f"The table below is sorted so the learners to contact first are at the top."
+    )
+
+    st.dataframe(results, use_container_width=True)
+
+    st.download_button(
+        "⬇ Download results as CSV",
+        results.to_csv(index=False).encode("utf-8"),
+        file_name="churn_risk_results.csv",
+        mime="text/csv",
+    )
+
+    st.caption(
+        "Privacy: this app does not save uploaded files. The model was trained on synthetic data, so results show how "
+        "the method works and should not be used for real decisions. Please do not upload real personal data."
+    )
