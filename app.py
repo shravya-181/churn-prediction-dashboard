@@ -61,7 +61,40 @@ SHORT_LABELS = {
     "plan_type_Monthly": "Monthly plan (vs annual)",
 }
 
+# ---- Sidebar: navigation + currency ----
+page = st.sidebar.radio(
+    "Navigate",
+    ["Start Here", "Overview", "Explore", "Predict", "Why?", "Retention Simulator"],
+)
+
+currency_choice = st.sidebar.selectbox("Currency", ["₹ Indian Rupee", "$ US Dollar"])
+IS_INR = currency_choice.startswith("₹")
+SYM = "₹" if IS_INR else "$"
+if IS_INR:
+    DEF_MONTHLY, DEF_ANNUAL, DEF_OFFER, MAX_OFFER, MAX_PRICE = 800, 500, 150, 1000, 10000
+else:
+    DEF_MONTHLY, DEF_ANNUAL, DEF_OFFER, MAX_OFFER, MAX_PRICE = 15, 10, 8, 50, 200
+
 # ---- Helper functions ----
+def fmt_money(x):
+    """Format money; uses Indian digit grouping (1,23,456) for rupees."""
+    x = float(x)
+    sign = "-" if x < 0 else ""
+    n = int(round(abs(x)))
+    s = str(n)
+    if IS_INR and len(s) > 3:
+        last3, rest = s[-3:], s[:-3]
+        parts = []
+        while len(rest) > 2:
+            parts.insert(0, rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            parts.insert(0, rest)
+        s = ",".join(parts) + "," + last3
+    elif not IS_INR:
+        s = f"{n:,}"
+    return f"{sign}{SYM}{s}"
+
 def tier_label(r):
     if r < 0.3:
         return "🟢 Low"
@@ -97,13 +130,114 @@ def score_all_learners():
     X_all = X_all.reindex(columns=model_columns, fill_value=0).astype(float)
     return model.predict_proba(scaler.transform(X_all))[:, 1]
 
-# ---- Sidebar navigation ----
-page = st.sidebar.radio("Navigate", ["Overview", "Explore", "Predict", "Why?", "Retention Simulator"])
-
 st.title("📚 EdTech Learner Churn Dashboard")
 
+# ========================== START HERE ==========================
+if page == "Start Here":
+    st.header("Start here: what is this project?")
+
+    st.markdown(
+        """
+**The problem.** An online learning platform (think Coursera, Udemy or Coding Ninjas) earns money from
+subscriptions. When a learner cancels, that is called **churn**. Finding out *after* someone leaves is too late.
+
+**The idea.** This dashboard looks at how learners behave (logins, quizzes, videos, exercises, satisfaction)
+and predicts **who is likely to leave, why, and what to do about it**, before they go.
+
+**About the data.** The 3,000 learners here are *synthetic*: generated with realistic behaviour rules,
+because real platforms do not publish their customer data. The patterns are realistic, but the learners are not real people.
+        """
+    )
+
+    st.subheader("What each page does")
+    a, b = st.columns(2)
+    with a:
+        st.markdown(
+            """
+- **Overview:** the big numbers and the biggest patterns at a glance
+- **Explore:** compare groups and behaviours, and see what separates learners who stay from those who leave
+- **Predict:** describe any learner and get their risk (🟢 low, 🟡 medium, 🔴 high)
+            """
+        )
+    with b:
+        st.markdown(
+            """
+- **Why?:** what drives churn overall, and the reasons behind one learner's risk, plus their persona
+- **Retention Simulator:** how much money a retention campaign could save, and a what-if tool for one learner
+            """
+        )
+
+    st.subheader("🧪 Try these experiments")
+    st.caption("Open each page from the sidebar and follow the steps. Each one takes about a minute.")
+
+    with st.expander("Experiment 1: Spot the warning signs (Predict page)"):
+        st.markdown(
+            """
+1. Open **Predict** and leave everything at its starting values. Note the risk.
+2. Set **Engagement trend** to *Declining* and **Days since last login** to *30*. What happens to the risk?
+3. Now set **Course completion** to *90* and **Satisfaction** to *5*. Does the risk recover?
+
+*What you learn:* no single signal decides churn. Many small signals add up.
+            """
+        )
+
+    with st.expander("Experiment 2: Which plan keeps learners longer? (Explore page)"):
+        st.markdown(
+            """
+1. Open **Explore** and compare churn by **Plan type**.
+2. Switch the comparison to **Signup goal**, then **Used a signup discount**.
+
+*What you learn:* how much commitment (annual plans, clear goals) matters.
+            """
+        )
+
+    with st.expander("Experiment 3: What can we do to save one learner? (Retention Simulator)"):
+        st.markdown(
+            """
+1. Open **Retention Simulator** and scroll to **What-if**.
+2. Click **Pick a random at-risk learner**.
+3. Choose **Hands-on exercises completed** and slide it up. Then try **Days since last login**.
+
+*What you learn:* which actions actually reduce risk, so a team knows where to spend effort.
+            """
+        )
+
+    with st.expander("Experiment 4: Is a campaign worth the money? (Retention Simulator)"):
+        st.markdown(
+            f"""
+1. In **Retention Simulator**, set the offer cost to the maximum and the success rate to 5%.
+2. Watch the ROI turn negative. Now move the sliders back and target fewer learners.
+
+*What you learn:* targeting the right learners is what makes a retention campaign pay off.
+            """
+        )
+
+    st.subheader("📖 Glossary")
+    glossary = {
+        "Churn": "When a learner cancels or stops renewing their subscription.",
+        "Churn rate": "The share of learners who left. A 23% churn rate means about 1 in 4 left.",
+        "Risk level (🟢🟡🔴)": "Low risk is under 30%, medium is 30 to 70%, high is above 70% predicted chance of leaving.",
+        "Engagement trend": "Whether a learner's activity is going up, staying flat or declining over recent weeks.",
+        "Persona": "A named group of similar at-risk learners (for example 'Struggling but Trying'), each with a suggested action.",
+        "Lifetime value": "The money a learner is expected to bring in over their whole subscription.",
+        "ROI": "Return on investment: how much money a campaign saves compared with what it costs.",
+        "Recall": "Of all learners who really left, how many the model caught. We tuned the model to catch as many as possible.",
+    }
+    for term, meaning in glossary.items():
+        with st.expander(term):
+            st.write(meaning)
+
+    st.subheader("⚠️ Honest limits")
+    st.markdown(
+        """
+- The data is synthetic, so results show how the method works, not how a real company behaves.
+- The model is tuned to catch most churners, so it raises more false alarms. Use the risk to **rank** learners, not as an exact probability.
+- Money amounts use assumed prices that you can change in the Retention Simulator.
+        """
+    )
+
 # =========================== OVERVIEW ===========================
-if page == "Overview":
+elif page == "Overview":
     st.header("Overview")
     st.info("How to read this: these numbers summarise all learners on the platform.")
 
@@ -363,13 +497,15 @@ elif page == "Retention Simulator":
     st.subheader("1. Campaign ROI")
 
     s1, s2, s3 = st.columns(3)
-    offer_cost = s1.slider("Cost per retention offer ($)", 1, 50, 8)
+    offer_cost = s1.slider(f"Cost per retention offer ({SYM})", 1, MAX_OFFER, DEF_OFFER, key=f"offer_{SYM}")
     success_rate = s2.slider("Offer success rate (%)", 5, 80, 35) / 100
     target_pct = s3.slider("Share of at-risk learners to target (%)", 5, 100, 20)
 
     p1, p2 = st.columns(2)
-    monthly_price = p1.number_input("Monthly plan price ($ per month)", min_value=1, max_value=100, value=15)
-    annual_price = p2.number_input("Annual plan price ($ per month equivalent)", min_value=1, max_value=100, value=10)
+    monthly_price = p1.number_input(f"Monthly plan price ({SYM} per month)", min_value=1, max_value=MAX_PRICE,
+                                    value=DEF_MONTHLY, key=f"mp_{SYM}")
+    annual_price = p2.number_input(f"Annual plan price ({SYM} per month equivalent)", min_value=1, max_value=MAX_PRICE,
+                                   value=DEF_ANNUAL, key=f"ap_{SYM}")
 
     biz = df[['plan_type', 'tenure_months']].copy()
     biz['risk'] = risk_all
@@ -399,28 +535,28 @@ elif page == "Retention Simulator":
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("At-risk learners", f"{len(at_risk_df):,}")
     k2.metric("Learners targeted", f"{n_target:,}")
-    k3.metric("Campaign cost", f"${campaign_cost:,.0f}")
+    k3.metric("Campaign cost", fmt_money(campaign_cost))
     k4.metric("ROI", f"{roi:,.0f}%")
 
     k5, k6 = st.columns(2)
-    k5.metric("Expected revenue saved", f"${revenue_saved:,.0f}")
-    k6.metric("Net value (saved minus cost)", f"${net_value:,.0f}")
+    k5.metric("Expected revenue saved", fmt_money(revenue_saved))
+    k6.metric("Net value (saved minus cost)", fmt_money(net_value))
 
     compare_chart = pd.DataFrame(
-        {"Dollars ($)": [do_nothing_loss, loss_with_campaign, campaign_cost]},
+        {f"Amount ({SYM})": [do_nothing_loss, loss_with_campaign, campaign_cost]},
         index=["Revenue lost: do nothing", "Revenue lost: run campaign", "Campaign cost"],
     )
     st.bar_chart(compare_chart)
 
     if net_value > 0:
         st.success(
-            f"Takeaway: spending ${campaign_cost:,.0f} on {n_target} learners could protect about "
-            f"${revenue_saved:,.0f} in revenue, compared with ${do_nothing_loss:,.0f} at risk if the company does nothing."
+            f"Takeaway: spending {fmt_money(campaign_cost)} on {n_target} learners could protect about "
+            f"{fmt_money(revenue_saved)} in revenue, compared with {fmt_money(do_nothing_loss)} at risk if the company does nothing."
         )
     else:
         st.warning(
-            f"Takeaway: with these settings the campaign costs ${campaign_cost:,.0f} but saves only "
-            f"${revenue_saved:,.0f}. Try targeting fewer learners or a cheaper offer."
+            f"Takeaway: with these settings the campaign costs {fmt_money(campaign_cost)} but saves only "
+            f"{fmt_money(revenue_saved)}. Try targeting fewer learners or a cheaper offer."
         )
 
     with st.expander("Who would we target first? (top 10)"):
@@ -429,13 +565,13 @@ elif page == "Retention Simulator":
             "Plan": top10['plan_type'],
             "Months subscribed": top10['tenure_months'],
             "Churn risk (%)": (top10['risk'] * 100).round(1),
-            "Lifetime value ($)": top10['clv'].round(0),
+            f"Lifetime value ({SYM})": top10['clv'].round(0),
         })
         st.dataframe(show, use_container_width=True)
 
     st.caption(
         "Simplified model: learners are ranked by churn risk x lifetime value, and every targeted learner "
-        "is assumed to be worth saving. Real savings would be lower."
+        "is assumed to be worth saving. Prices are assumptions you can change. Real savings would be lower."
     )
 
     # ---------------- Part 2: What-if ----------------
