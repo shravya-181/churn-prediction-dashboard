@@ -1,10 +1,72 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
 import joblib
 import json
 
-st.set_page_config(page_title="EdTech Churn Dashboard", layout="wide")
+st.set_page_config(page_title="EdTech Churn Dashboard", page_icon="📚", layout="wide")
+
+# ====================== LOOK AND FEEL (CSS) ======================
+st.markdown(
+    """
+<style>
+.block-container {padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1200px;}
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #F4F2FF 0%, #E6E0FF 100%);}
+.side-brand {padding: 6px 4px 14px 4px; border-bottom: 2px solid #6C5CE7; margin-bottom: 12px;
+             font-size: 1.15rem; color: #2D1B69;}
+.side-brand span {font-size: 0.8rem; color: #6B6B8D;}
+
+.hero {background: linear-gradient(120deg, #6C5CE7 0%, #8E7CF8 55%, #5AA9F0 100%);
+       padding: 26px 32px; border-radius: 18px; margin-bottom: 22px;
+       box-shadow: 0 6px 20px rgba(108, 92, 231, 0.25);}
+.hero-title {font-size: 2rem; font-weight: 800; color: #FFFFFF; line-height: 1.2;}
+.hero-sub {font-size: 1.02rem; color: rgba(255, 255, 255, 0.92); margin-top: 6px;}
+
+h2, h3 {color: #2D1B69 !important;}
+
+[data-testid="stMetric"] {background: #FFFFFF; border: 1px solid #E6E1FA; border-left: 5px solid #6C5CE7;
+                          padding: 14px 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(108, 92, 231, 0.08);}
+[data-testid="stMetricValue"] {color: #2D1B69;}
+
+[data-testid="stAlert"] {border-radius: 12px;}
+[data-testid="stExpander"] {border: 1px solid #E6E1FA !important; border-radius: 12px; background: #FFFFFF;}
+
+.stButton > button, [data-testid="stDownloadButton"] > button {
+    border-radius: 10px; border: 1.5px solid #6C5CE7; font-weight: 600; color: #4B2FB5; background: #FFFFFF;}
+.stButton > button:hover, [data-testid="stDownloadButton"] > button:hover {
+    background: #6C5CE7; color: #FFFFFF; border-color: #6C5CE7;}
+
+.feature-card {background: #FFFFFF; border: 1px solid #E6E1FA; border-radius: 16px; padding: 20px 18px;
+               text-align: center; box-shadow: 0 3px 12px rgba(108, 92, 231, 0.10); height: 100%;}
+.fc-icon {font-size: 2.2rem;}
+.fc-title {font-size: 1.15rem; font-weight: 700; color: #2D1B69; margin: 6px 0 4px 0;}
+.fc-text {font-size: 0.92rem; color: #4A4A68;}
+
+.risk-banner {border-radius: 14px; padding: 16px 20px; margin: 8px 0 14px 0;}
+.risk-title {font-size: 1.35rem; font-weight: 800;}
+.risk-text {font-size: 0.98rem; margin-top: 4px; color: #2B2B3C;}
+.risk-low {background: #E3F9F1; border-left: 8px solid #00B894;}
+.risk-low .risk-title {color: #00785F;}
+.risk-mid {background: #FFF6DB; border-left: 8px solid #FDCB6E;}
+.risk-mid .risk-title {color: #9A6B00;}
+.risk-high {background: #FFE6E0; border-left: 8px solid #E17055;}
+.risk-high .risk-title {color: #B03A1F;}
+
+.persona-card {background: #F4F2FF; border: 1px solid #D8D0FA; border-left: 8px solid #6C5CE7;
+               border-radius: 14px; padding: 16px 20px; margin: 8px 0 14px 0;}
+.persona-name {font-size: 1.25rem; font-weight: 800; color: #2D1B69;}
+.persona-action {font-size: 0.97rem; margin-top: 4px; color: #2B2B3C;}
+
+.app-footer {text-align: center; color: #8A8AA3; font-size: 0.85rem; margin-top: 40px;
+             padding-top: 14px; border-top: 1px solid #E6E1FA;}
+</style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ---- Load everything once, at startup ----
 @st.cache_resource
@@ -59,6 +121,14 @@ SHORT_LABELS = {
     "support_tickets_raised": "Support tickets",
     "satisfaction_score": "Satisfaction",
     "plan_type_Monthly": "Monthly plan (vs annual)",
+}
+
+PALETTE = ["#6C5CE7", "#A29BFE", "#74B9FF", "#81ECEC"]
+PERSONA_ICONS = {
+    "Passive Coaster": "🛋️",
+    "Goal-Focused Drifter": "🎯",
+    "Quiet Achiever": "🤫",
+    "Struggling but Trying": "😣",
 }
 
 # ---- Predict page: starting values and example learners ----
@@ -116,7 +186,11 @@ def reset_learner():
     for k, v in PRED_DEFAULTS.items():
         st.session_state[k] = v
 
-# ---- Sidebar: navigation + currency ----
+# ---- Sidebar: branding + navigation + currency ----
+st.sidebar.markdown(
+    "<div class='side-brand'>📚 <b>Churn Dashboard</b><br><span>Predict · Explain · Act</span></div>",
+    unsafe_allow_html=True,
+)
 page = st.sidebar.radio(
     "Navigate",
     ["Start Here", "Overview", "Explore", "Predict", "Why?", "Retention Simulator", "Try Your Own Data"],
@@ -157,6 +231,75 @@ def tier_label(r):
         return "🟡 Medium"
     return "🔴 High"
 
+def hero(title, subtitle):
+    st.markdown(
+        f"<div class='hero'><div class='hero-title'>{title}</div><div class='hero-sub'>{subtitle}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+def risk_banner(risk, long=True):
+    if risk < 0.3:
+        cls, title = "risk-low", "🟢 Low risk"
+        text = "This learner is likely to stay. No action needed, a friendly 'keep it up' message is enough."
+    elif risk < 0.7:
+        cls, title = "risk-mid", "🟡 Medium risk"
+        text = "This learner needs attention. Try a check-in email or a personalised course suggestion."
+    else:
+        cls, title = "risk-high", "🔴 High risk"
+        text = "This learner is likely to leave. Act now with personal outreach or a win-back offer."
+    body = f"<div class='risk-text'>{text}</div>" if long else ""
+    st.markdown(
+        f"<div class='risk-banner {cls}'><div class='risk-title'>{title}</div>{body}</div>",
+        unsafe_allow_html=True,
+    )
+
+def persona_card(name, action):
+    icon = PERSONA_ICONS.get(name, "👤")
+    st.markdown(
+        f"<div class='persona-card'><div class='persona-name'>{icon} {name}</div>"
+        f"<div class='persona-action'><b>Recommended action:</b> {action}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+def pretty_bar(data, y_title="", colors=None, sign_colors=False, horizontal=False):
+    """Rounded, coloured bar chart. data = Series or one-column DataFrame."""
+    if isinstance(data, pd.DataFrame):
+        data = data.iloc[:, 0]
+    d = pd.DataFrame({"label": [str(i) for i in data.index], "value": data.values.astype(float)})
+    order = list(d["label"])
+    if sign_colors:
+        d["color"] = np.where(d["value"] > 0, "#E17055", "#00B894")
+    elif colors:
+        d["color"] = [colors[i % len(colors)] for i in range(len(d))]
+    else:
+        d["color"] = "#6C5CE7"
+    tip = [alt.Tooltip("label:N", title=""), alt.Tooltip("value:Q", format=",.1f", title=y_title or "Value")]
+    if horizontal:
+        chart = (
+            alt.Chart(d)
+            .mark_bar(cornerRadiusTopRight=6, cornerRadiusBottomRight=6)
+            .encode(
+                y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=240)),
+                x=alt.X("value:Q", title=y_title),
+                color=alt.Color("color:N", scale=None, legend=None),
+                tooltip=tip,
+            )
+            .properties(height=max(160, 34 * len(d)))
+        )
+    else:
+        chart = (
+            alt.Chart(d)
+            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+            .encode(
+                x=alt.X("label:N", sort=order, title=None, axis=alt.Axis(labelAngle=0, labelLimit=160)),
+                y=alt.Y("value:Q", title=y_title),
+                color=alt.Color("color:N", scale=None, legend=None),
+                tooltip=tip,
+            )
+            .properties(height=320)
+        )
+    st.altair_chart(chart, use_container_width=True)
+
 def learner_risk(learner, overrides=None):
     """Churn risk (0-1) for one learner row from df, with optional changed values."""
     overrides = overrides or {}
@@ -185,7 +328,8 @@ def score_all_learners():
     X_all = X_all.reindex(columns=model_columns, fill_value=0).astype(float)
     return model.predict_proba(scaler.transform(X_all))[:, 1]
 
-st.title("📚 EdTech Learner Churn Dashboard")
+hero("📚 EdTech Learner Churn Dashboard",
+     "Predict who will leave, understand why, and know what to do about it, before they go.")
 
 # ========================== START HERE ==========================
 if page == "Start Here":
@@ -203,6 +347,19 @@ and predicts **who is likely to leave, why, and what to do about it**, before th
 because real platforms do not publish their customer data. The patterns are realistic, but the learners are not real people.
         """
     )
+
+    f1, f2, f3 = st.columns(3)
+    feature_cards = [
+        ("🔮", "Predict", "See who is likely to leave, with a 🟢🟡🔴 risk level."),
+        ("🧠", "Understand", "Find out why, with plain-English reasons and learner personas."),
+        ("💰", "Act", "Test what-if changes and see whether a retention campaign pays off."),
+    ]
+    for col, (icon, title, text) in zip((f1, f2, f3), feature_cards):
+        col.markdown(
+            f"<div class='feature-card'><div class='fc-icon'>{icon}</div>"
+            f"<div class='fc-title'>{title}</div><div class='fc-text'>{text}</div></div>",
+            unsafe_allow_html=True,
+        )
 
     st.subheader("What each page does")
     a, b = st.columns(2)
@@ -315,7 +472,7 @@ elif page == "Overview":
 
     st.subheader("Churn rate by plan type (%)")
     plan_churn = df.groupby('plan_type')['churned'].mean() * 100
-    st.bar_chart(plan_churn)
+    pretty_bar(plan_churn, "Churn rate (%)", colors=["#6C5CE7", "#A29BFE"])
     st.success(
         f"Takeaway: {plan_churn.idxmax()} learners churn the most "
         f"({plan_churn.max():.1f}%), compared with {plan_churn.min():.1f}% for {plan_churn.idxmin()}."
@@ -325,7 +482,7 @@ elif page == "Overview":
     trend_labels = {-1: 'Declining', 0: 'Flat', 1: 'Improving'}
     trend_churn = df.groupby('engagement_trend')['churned'].mean() * 100
     trend_churn.index = trend_churn.index.map(trend_labels)
-    st.bar_chart(trend_churn)
+    pretty_bar(trend_churn, "Churn rate (%)", colors=["#E17055", "#B2BEC3", "#00B894"])
     st.success(
         f"Takeaway: learners whose activity is declining churn at {trend_churn['Declining']:.1f}%, "
         f"versus {trend_churn['Improving']:.1f}% for learners whose activity is improving."
@@ -345,7 +502,7 @@ elif page == "Explore":
     }
     group_label = st.selectbox("Compare churn by:", list(groups.keys()))
     rates = df.groupby(groups[group_label])['churned'].mean() * 100
-    st.bar_chart(rates)
+    pretty_bar(rates, "Churn rate (%)", colors=PALETTE)
     st.success(
         f"Takeaway: '{rates.idxmax()}' learners churn the most ({rates.max():.1f}%), "
         f"while '{rates.idxmin()}' learners churn the least ({rates.min():.1f}%)."
@@ -363,7 +520,7 @@ elif page == "Explore":
     behaviour_label = st.selectbox("Pick a behaviour:", list(behaviours.keys()))
     avg = df.groupby('churned')[behaviours[behaviour_label]].mean()
     compare = pd.DataFrame({"Average": [avg[0], avg[1]]}, index=["Stayed", "Churned"])
-    st.bar_chart(compare)
+    pretty_bar(compare, "Average", colors=["#00B894", "#E17055"])
     st.success(
         f"Takeaway: on '{behaviour_label}', learners who stayed average {avg[0]:.1f}, "
         f"while learners who churned average {avg[1]:.1f}."
@@ -445,13 +602,7 @@ elif page == "Predict":
     st.divider()
     st.subheader("Result")
     st.metric("Churn risk", f"{risk * 100:.1f}%")
-
-    if risk < 0.3:
-        st.success("🟢 Low risk: this learner is likely to stay. No action needed, a friendly 'keep it up' message is enough.")
-    elif risk < 0.7:
-        st.warning("🟡 Medium risk: this learner needs attention. Try a check-in email or a personalised course suggestion.")
-    else:
-        st.error("🔴 High risk: this learner is likely to leave. Act now with personal outreach or a win-back offer.")
+    risk_banner(risk)
 
     # Plain-English reasons (for a linear model, contribution = coefficient x scaled value)
     contrib = pd.Series(model.coef_[0] * input_scaled[0], index=model_columns)
@@ -479,10 +630,11 @@ elif page == "Why?":
     coefs = coefs[[c for c in coefs.index if c in SHORT_LABELS]]
     top = coefs.reindex(coefs.abs().sort_values(ascending=False).index).head(10)
     chart = pd.DataFrame(
-        {"Effect on churn risk (above 0 = raises risk, below 0 = lowers risk)": top.values},
+        {"Effect": top.values},
         index=[SHORT_LABELS[c] for c in top.index],
     )
-    st.bar_chart(chart)
+    pretty_bar(chart, "Effect on churn risk (red = raises risk, green = lowers risk)",
+               sign_colors=True, horizontal=True)
 
     top_name = SHORT_LABELS[top.index[0]]
     top_dir = "lowers" if top.iloc[0] < 0 else "raises"
@@ -529,22 +681,18 @@ elif page == "Why?":
     m3.metric("Days since last login", f"{int(learner['days_since_last_login'])}")
     m4.metric("Actually churned?", "Yes" if learner['churned'] == 1 else "No")
 
-    if risk < 0.3:
-        st.success("🟢 Low risk")
-    elif risk < 0.7:
-        st.warning("🟡 Medium risk")
-    else:
-        st.error("🔴 High risk")
+    risk_banner(risk, long=False)
 
     # Reasons for this learner (linear model: contribution = coefficient x scaled value)
     contrib = pd.Series(model.coef_[0] * input_scaled[0], index=model_columns)
     contrib = contrib[[c for c in contrib.index if c in SHORT_LABELS]]
     top_contrib = contrib.reindex(contrib.abs().sort_values(ascending=False).index).head(6)
     contrib_chart = pd.DataFrame(
-        {"Push on risk (above 0 = toward leaving, below 0 = toward staying)": top_contrib.values},
+        {"Push": top_contrib.values},
         index=[SHORT_LABELS[c] for c in top_contrib.index],
     )
-    st.bar_chart(contrib_chart)
+    pretty_bar(contrib_chart, "Push on risk (red = toward leaving, green = toward staying)",
+               sign_colors=True, horizontal=True)
 
     up = [FEATURE_LABELS.get(c, c) for c in contrib[contrib > 0].sort_values(ascending=False).head(3).index]
     down = [FEATURE_LABELS.get(c, c) for c in contrib[contrib < 0].sort_values().head(2).index]
@@ -560,8 +708,8 @@ elif page == "Why?":
         cluster_input = pd.DataFrame([learner[cluster_columns].astype(float)])
         cluster_id = int(kmeans.predict(cluster_scaler.transform(cluster_input))[0])
         info = persona_info[str(cluster_id)]
-        st.subheader(f"Persona: {info['name']}")
-        st.write(f"**Recommended action:** {info['action']}")
+        st.subheader("Persona")
+        persona_card(info["name"], info["action"])
     else:
         st.caption("Personas only apply to learners at medium or high risk.")
 
@@ -624,10 +772,10 @@ elif page == "Retention Simulator":
     k6.metric("Net value (saved minus cost)", fmt_money(net_value))
 
     compare_chart = pd.DataFrame(
-        {f"Amount ({SYM})": [do_nothing_loss, loss_with_campaign, campaign_cost]},
+        {"Amount": [do_nothing_loss, loss_with_campaign, campaign_cost]},
         index=["Revenue lost: do nothing", "Revenue lost: run campaign", "Campaign cost"],
     )
-    st.bar_chart(compare_chart)
+    pretty_bar(compare_chart, f"Amount ({SYM})", colors=["#E17055", "#FDCB6E", "#6C5CE7"])
 
     if net_value > 0:
         st.success(
@@ -886,7 +1034,7 @@ Tip: download the template below, replace the rows with your own learners, and u
     m3.metric("🟡 Medium risk", f"{int(counts['🟡 Medium']):,}")
     m4.metric("🟢 Low risk", f"{int(counts['🟢 Low']):,}")
 
-    st.bar_chart(counts)
+    pretty_bar(counts, "Learners", colors=["#00B894", "#FDCB6E", "#E17055"])
 
     n_act = int(counts["🔴 High"] + counts["🟡 Medium"])
     st.success(
@@ -894,7 +1042,18 @@ Tip: download the template below, replace the rows with your own learners, and u
         f"The table below is sorted so the learners to contact first are at the top."
     )
 
-    st.dataframe(results, use_container_width=True)
+    def color_risk(col):
+        return [
+            "background-color: #FFE6E0" if "High" in v
+            else "background-color: #FFF6DB" if "Medium" in v
+            else "background-color: #E3F9F1"
+            for v in col
+        ]
+
+    st.dataframe(
+        results.style.apply(color_risk, subset=["Risk level"]).format({"Churn risk (%)": "{:.1f}"}),
+        use_container_width=True,
+    )
 
     # Excel-friendly download: plain words instead of emoji, and a marker so Excel reads it correctly
     csv_df = results.copy()
@@ -910,3 +1069,9 @@ Tip: download the template below, replace the rows with your own learners, and u
         "Privacy: this app does not save uploaded files. The model was trained on synthetic data, so results show how "
         "the method works and should not be used for real decisions. Please do not upload real personal data."
     )
+
+# ============================ FOOTER ============================
+st.markdown(
+    "<div class='app-footer'>Built as a data science portfolio project · Synthetic data, for learning and demonstration</div>",
+    unsafe_allow_html=True,
+)
