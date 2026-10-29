@@ -2,7 +2,7 @@
 
 An interactive dashboard that predicts which learners on a subscription learning platform (think Coursera, Udemy or Coding Ninjas) are likely to cancel, explains **why**, and suggests **what to do about it**.
 
-🔗 **Live demo:** https://churn-prediction-dashboard-uh4q8f9sqxb8frx4wi7kjg.streamlit.app
+🔗 **Live demo:** (https://edtech-churn-dashboard.streamlit.app/)
 
 > **Note:** the dataset is **synthetic** (3,000 generated learners). Real platforms do not publish customer data, so I designed behaviour rules based on realistic assumptions. The results show how the method works, not how a real company behaves.
 
