@@ -4,6 +4,8 @@ import numpy as np
 import altair as alt
 import joblib
 import json
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
 
 st.set_page_config(page_title="EdTech Churn Dashboard", page_icon="📚", layout="wide")
 
@@ -193,7 +195,8 @@ st.sidebar.markdown(
 )
 page = st.sidebar.radio(
     "Navigate",
-    ["Start Here", "Overview", "Explore", "Predict", "Why?", "Retention Simulator", "Try Your Own Data"],
+    ["Start Here", "Overview", "Explore", "Predict", "Why?", "Model Performance",
+     "Retention Simulator", "Try Your Own Data"],
 )
 
 currency_choice = st.sidebar.selectbox("Currency", ["₹ Indian Rupee", "$ US Dollar"])
@@ -328,6 +331,35 @@ def score_all_learners():
     X_all = X_all.reindex(columns=model_columns, fill_value=0).astype(float)
     return model.predict_proba(scaler.transform(X_all))[:, 1]
 
+@st.cache_data
+def get_test_results():
+    """True outcomes and predicted risks for the 600 held-out test learners
+    (same 80/20 stratified split, random_state=42, as in the training notebook)."""
+    X_all = pd.get_dummies(
+        df.drop(columns=['churned', 'days_to_churn']),
+        columns=['occupation_type', 'signup_goal', 'plan_type', 'signup_discount_used'],
+    )
+    X_all = X_all.reindex(columns=model_columns, fill_value=0).astype(float)
+    y_all = df['churned'].values
+    _, X_test, _, y_test = train_test_split(
+        X_all, y_all, test_size=0.2, random_state=42, stratify=y_all
+    )
+    probs = model.predict_proba(scaler.transform(X_test))[:, 1]
+    return y_test, probs
+
+def metrics_at(y_true, probs, t):
+    """Confusion matrix counts and scores when flagging everyone with risk >= t."""
+    pred = (probs >= t).astype(int)
+    tp = int(((pred == 1) & (y_true == 1)).sum())
+    fp = int(((pred == 1) & (y_true == 0)).sum())
+    fn = int(((pred == 0) & (y_true == 1)).sum())
+    tn = int(((pred == 0) & (y_true == 0)).sum())
+    acc = (tp + tn) / len(y_true)
+    prec = tp / (tp + fp) if (tp + fp) else 0.0
+    rec = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+    return tp, fp, fn, tn, acc, prec, rec, f1
+
 hero("📚 EdTech Learner Churn Dashboard",
      "Predict who will leave, understand why, and know what to do about it, before they go.")
 
@@ -348,13 +380,13 @@ because real platforms do not publish their customer data. The patterns are real
         """
     )
 
-    f1, f2, f3 = st.columns(3)
+    f1c, f2c, f3c = st.columns(3)
     feature_cards = [
         ("🔮", "Predict", "See who is likely to leave, with a 🟢🟡🔴 risk level."),
         ("🧠", "Understand", "Find out why, with plain-English reasons and learner personas."),
         ("💰", "Act", "Test what-if changes and see whether a retention campaign pays off."),
     ]
-    for col, (icon, title, text) in zip((f1, f2, f3), feature_cards):
+    for col, (icon, title, text) in zip((f1c, f2c, f3c), feature_cards):
         col.markdown(
             f"<div class='feature-card'><div class='fc-icon'>{icon}</div>"
             f"<div class='fc-title'>{title}</div><div class='fc-text'>{text}</div></div>",
@@ -369,12 +401,13 @@ because real platforms do not publish their customer data. The patterns are real
 - **Overview:** the big numbers and the biggest patterns at a glance
 - **Explore:** compare groups and behaviours, and see what separates learners who stay from those who leave
 - **Predict:** describe any learner (or load an example) and get their risk (🟢 low, 🟡 medium, 🔴 high)
+- **Why?:** what drives churn overall, and the reasons behind one learner's risk, plus their persona
             """
         )
     with b:
         st.markdown(
             """
-- **Why?:** what drives churn overall, and the reasons behind one learner's risk, plus their persona
+- **Model Performance:** how good the model really is, and how the decision threshold trades missed leavers against false alarms
 - **Retention Simulator:** how much money a retention campaign could save, and a what-if tool for one learner
 - **Try Your Own Data:** upload a CSV of learners and get every learner's risk, reason and persona
             """
@@ -435,6 +468,17 @@ because real platforms do not publish their customer data. The patterns are real
             """
         )
 
+    with st.expander("Experiment 6: Catch more leavers, or raise fewer false alarms? (Model Performance)"):
+        st.markdown(
+            """
+1. Open **Model Performance** and drag the **decision threshold** slider down to *0.30*, then up to *0.70*.
+2. Watch the "leavers caught" and "false alarms" numbers move in opposite directions.
+3. In the cost section, make a missed leaver much more expensive than a false alarm. What happens to the best threshold?
+
+*What you learn:* there is no free lunch. The right setting depends on what each mistake costs the business.
+            """
+        )
+
     st.subheader("📖 Glossary")
     glossary = {
         "Churn": "When a learner cancels or stops renewing their subscription.",
@@ -445,6 +489,8 @@ because real platforms do not publish their customer data. The patterns are real
         "Lifetime value": "The money a learner is expected to bring in over their whole subscription.",
         "ROI": "Return on investment: how much money a campaign saves compared with what it costs.",
         "Recall": "Of all learners who really left, how many the model caught. We tuned the model to catch as many as possible.",
+        "Precision": "Of all learners the model flagged, how many really would have left. Low precision means many false alarms.",
+        "Decision threshold": "The risk level above which a learner is flagged. A lower threshold flags more learners: more leavers caught, but more false alarms.",
     }
     for term, meaning in glossary.items():
         with st.expander(term):
@@ -714,6 +760,192 @@ elif page == "Why?":
         st.caption("Personas only apply to learners at medium or high risk.")
 
     st.caption("Note: the model is tuned to catch as many churners as possible, so its percentages run higher than real-world churn rates. Use them to rank learners, not as exact probabilities.")
+
+# ======================= MODEL PERFORMANCE =======================
+elif page == "Model Performance":
+    st.header("Model performance: how good is the model, really?")
+    st.info(
+        "How to read this: the model is graded only on 600 learners it never saw during training. "
+        "Drag the threshold slider to decide how cautious the model should be."
+    )
+
+    y_test, probs_test = get_test_results()
+
+    # ---------------- Part 1: report card ----------------
+    st.subheader("1. The report card")
+    threshold = st.slider(
+        "Decision threshold: flag a learner as 'likely to leave' when their risk is at least",
+        0.05, 0.95, 0.50, 0.05,
+        help="Lower = flag more learners (catch more leavers, more false alarms). Higher = flag fewer.",
+    )
+
+    tp, fp, fn, tn, acc, prec, rec, f1 = metrics_at(y_test, probs_test, threshold)
+    auc = roc_auc_score(y_test, probs_test)
+
+    st.markdown("**Learners who actually left**")
+    left1, left2 = st.columns(2)
+    left1.metric("✅ Leavers the model caught", f"{tp}")
+    left2.metric("❌ Leavers the model missed", f"{fn}")
+
+    st.markdown("**Learners who actually stayed**")
+    stay1, stay2 = st.columns(2)
+    stay1.metric("⚠️ Stayers flagged by mistake (false alarms)", f"{fp}")
+    stay2.metric("✅ Stayers correctly left alone", f"{tn}")
+
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.metric("Accuracy", f"{acc * 100:.0f}%")
+    s2.metric("Precision", f"{prec * 100:.0f}%")
+    s3.metric("Recall", f"{rec * 100:.0f}%")
+    s4.metric("F1 score", f"{f1 * 100:.0f}%")
+    s5.metric("AUC", f"{auc:.2f}")
+
+    st.success(
+        f"Takeaway: at a threshold of {threshold:.2f}, the model catches {rec * 100:.0f}% of the learners who leave, "
+        f"but {100 - prec * 100:.0f}% of the learners it flags would have stayed anyway."
+    )
+
+    with st.expander("What do these numbers mean?"):
+        st.markdown(
+            """
+- **Accuracy:** how often the model is right overall. It can look good even when the model misses most leavers, because most learners stay.
+- **Precision:** of the learners the model flags, how many really leave. Low precision means many wasted retention offers.
+- **Recall:** of the learners who really leave, how many the model catches. Low recall means silent revenue loss.
+- **F1 score:** one number that balances precision and recall.
+- **AUC:** pick one leaver and one stayer at random. AUC is how often the model gives the leaver the higher risk. 0.50 is a coin flip, 1.00 is perfect.
+            """
+        )
+
+    st.caption(
+        "Check: at threshold 0.50 you should see 104 leavers caught, 34 missed, 104 false alarms and 358 stayers correctly "
+        "left alone, the same as the training notebook (a difference of one or two learners is just rounding)."
+    )
+
+    # ---------------- Part 2: trade-off chart ----------------
+    st.divider()
+    st.subheader("2. The trade-off: catching leavers vs false alarms")
+
+    grid = np.round(np.arange(0.05, 0.96, 0.05), 2)
+    sweep_rows = []
+    for t in grid:
+        s_tp, s_fp, s_fn, s_tn, s_acc, s_prec, s_rec, s_f1 = metrics_at(y_test, probs_test, t)
+        sweep_rows.append({
+            "Threshold": float(t), "Precision": s_prec * 100, "Recall": s_rec * 100, "F1": s_f1 * 100,
+            "FN": s_fn, "FP": s_fp,
+        })
+    sweep = pd.DataFrame(sweep_rows)
+
+    sweep_long = sweep.melt(id_vars="Threshold", value_vars=["Precision", "Recall", "F1"],
+                            var_name="Metric", value_name="Percent")
+    lines = (
+        alt.Chart(sweep_long)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("Threshold:Q", title="Decision threshold"),
+            y=alt.Y("Percent:Q", title="Percent"),
+            color=alt.Color(
+                "Metric:N",
+                scale=alt.Scale(domain=["Precision", "Recall", "F1"], range=["#6C5CE7", "#E17055", "#00B894"]),
+                legend=alt.Legend(title=None, orient="bottom"),
+            ),
+            tooltip=[alt.Tooltip("Threshold:Q", format=".2f"), alt.Tooltip("Metric:N"),
+                     alt.Tooltip("Percent:Q", format=".1f")],
+        )
+    )
+    marker = (
+        alt.Chart(pd.DataFrame({"Threshold": [float(threshold)]}))
+        .mark_rule(color="#2D1B69", strokeDash=[5, 4], size=2)
+        .encode(x="Threshold:Q")
+    )
+    st.altair_chart((lines + marker).properties(height=320), use_container_width=True)
+    st.success(
+        "Takeaway: as the threshold goes down, recall rises (fewer leavers slip through) but precision falls "
+        "(more false alarms). The dashed line shows your chosen threshold."
+    )
+
+    # ---------------- Part 3: cost of mistakes ----------------
+    st.divider()
+    st.subheader("3. What do the mistakes cost?")
+    st.info("How to read this: set what each kind of mistake costs, and find the threshold with the lowest total cost.")
+
+    cc1, cc2 = st.columns(2)
+    miss_cost = cc1.number_input(
+        f"Cost of missing a learner who leaves ({SYM}, about 6 months of fees)",
+        min_value=1, max_value=1000000, value=DEF_MONTHLY * 6, key=f"miss_{SYM}",
+    )
+    alarm_cost = cc2.number_input(
+        f"Cost of a false alarm: one wasted retention offer ({SYM})",
+        min_value=1, max_value=1000000, value=DEF_OFFER, key=f"alarm_{SYM}",
+    )
+
+    sweep["Cost"] = sweep["FN"] * miss_cost + sweep["FP"] * alarm_cost
+    best_row = sweep.loc[sweep["Cost"].idxmin()]
+    best_t = float(best_row["Threshold"])
+    best_cost = float(best_row["Cost"])
+    sel_cost = float(fn * miss_cost + fp * alarm_cost)
+
+    q1, q2, q3 = st.columns(3)
+    q1.metric(f"Total cost at {threshold:.2f}", fmt_money(sel_cost))
+    q2.metric("Lowest possible total cost", fmt_money(best_cost))
+    q3.metric("Cheapest threshold", f"{best_t:.2f}")
+
+    cost_line = (
+        alt.Chart(sweep)
+        .mark_line(point=True, color="#6C5CE7")
+        .encode(
+            x=alt.X("Threshold:Q", title="Decision threshold"),
+            y=alt.Y("Cost:Q", title=f"Total cost of mistakes ({SYM})"),
+            tooltip=[alt.Tooltip("Threshold:Q", format=".2f"), alt.Tooltip("Cost:Q", format=",.0f")],
+        )
+    )
+    cost_marker = (
+        alt.Chart(pd.DataFrame({"Threshold": [float(threshold)]}))
+        .mark_rule(color="#2D1B69", strokeDash=[5, 4], size=2)
+        .encode(x="Threshold:Q")
+    )
+    st.altair_chart((cost_line + cost_marker).properties(height=300), use_container_width=True)
+
+    ratio = miss_cost / alarm_cost
+    if abs(best_t - threshold) < 1e-9:
+        st.success(
+            f"Takeaway: a missed leaver costs {ratio:.0f}x a false alarm here, and your chosen threshold of "
+            f"{threshold:.2f} is already the cheapest one."
+        )
+    else:
+        st.success(
+            f"Takeaway: a missed leaver costs {ratio:.0f}x a false alarm here, so the cheapest threshold is {best_t:.2f}, "
+            f"with a total cost of {fmt_money(best_cost)} on these 600 learners (versus {fmt_money(sel_cost)} at {threshold:.2f})."
+        )
+    st.caption(
+        "Simplified: every missed leaver is assumed to be lost, every false alarm wastes one offer, and the cost of offers "
+        "sent to correctly flagged learners is ignored."
+    )
+
+    # ---------------- Part 4: model comparison ----------------
+    st.divider()
+    st.subheader("4. Why this model?")
+    comparison = pd.DataFrame(
+        {
+            "Accuracy": ["83.5%", "77%", "82%", "81%"],
+            "Leavers caught (recall)": ["54%", "75%", "67%", "64%"],
+            "Precision": ["68%", "50%", "60%", "58%"],
+            "Leavers missed": [63, 34, 46, 49],
+        },
+        index=[
+            "Logistic Regression",
+            "Logistic Regression, balanced (used here)",
+            "Random Forest",
+            "XGBoost",
+        ],
+    )
+    st.dataframe(comparison, use_container_width=True)
+    st.success(
+        "Takeaway: the simplest model with class weighting caught the most leavers. The more complex models did not win, "
+        "because the synthetic data follows clean, additive patterns."
+    )
+    st.caption(
+        "Comparison numbers come from the training notebook, on the same 600 test learners. "
+        "All results are on synthetic data, so real-world performance would differ."
+    )
 
 # ======================= RETENTION SIMULATOR =======================
 elif page == "Retention Simulator":
