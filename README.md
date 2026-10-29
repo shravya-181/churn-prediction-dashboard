@@ -1,9 +1,8 @@
 # 📚 EdTech Learner Churn Prediction Dashboard
 
-An interactive dashboard that predicts which learners on a subscription learning platform (think Coursera, Udemy or Coding Ninjas) are likely to cancel, explains **why**, and suggests **what to do about it**.
+An interactive dashboard that predicts which learners on a subscription learning platform (think Coursera, Udemy or Coding Ninjas) are likely to cancel, explains **why**, shows **when** they leave, and suggests **what to do about it**.
 
 🔗 **Live demo:** (https://edtech-churn-dashboard.streamlit.app/)
-
 > **Note:** the dataset is **synthetic** (3,000 generated learners). Real platforms do not publish customer data, so I designed behaviour rules based on realistic assumptions. The results show how the method works, not how a real company behaves.
 
 ## Screenshots
@@ -21,6 +20,8 @@ An interactive dashboard that predicts which learners on a subscription learning
 | **Explore** | Compare churn across plans, goals, occupations and behaviours |
 | **Predict** | Describe any learner (or load an example) and get a 🟢🟡🔴 risk level |
 | **Why?** | See what drives churn overall and the reasons behind one learner's risk, plus their persona |
+| **Model Performance** | Confusion matrix, precision, recall, F1 and AUC on 600 unseen learners, an adjustable decision threshold, and a cost-of-mistakes calculator |
+| **Survival Curves** | Kaplan-Meier retention curves by plan, goal, occupation or discount, with a "% still subscribed at day X" readout |
 | **Retention Simulator** | Estimate the ROI of a retention campaign (₹ or $) and test what-if changes for a learner |
 | **Try Your Own Data** | Upload a CSV and score a whole list of learners; download the results |
 
@@ -29,6 +30,8 @@ An interactive dashboard that predicts which learners on a subscription learning
 - **Risk tiers, not just yes/no:** Low (<30%), Medium (30-70%), High (>70%) so each learner gets a proportionate response
 - **Learner personas:** at-risk learners are grouped with K-Means into 4 personas (Passive Coaster, Goal-Focused Drifter, Quiet Achiever, Struggling but Trying), each with a recommended action
 - **Plain-English explanations:** each prediction lists its biggest risk factors in words
+- **Honest evaluation:** metrics are computed only on the held-out test set, with a threshold slider and a cost calculator that finds the cheapest threshold
+- **Survival analysis:** Kaplan-Meier curves (written from scratch in pandas) show when learners leave, not just whether they leave
 - **What-if simulator:** change one factor (for example hands-on exercises) and see the risk move
 - **Retention ROI:** learners are ranked by churn risk × lifetime value to see where a campaign pays off
 - **Batch scoring:** upload a CSV, get a sorted "who to contact first" list
@@ -57,9 +60,15 @@ Evaluated on a held-out test set of 600 learners (80/20 stratified split):
 
 **A bug worth mentioning:** the what-if simulator once showed risk *rising* after a positive change. The cause was multicollinearity (`peer_completion_percentile` overlapped with course completion and got a wrong-signed coefficient). I removed it, and recall and precision stayed the same.
 
-## Also in the notebook
+## Survival analysis
 
-Exploratory analysis, SHAP explanations, and Kaplan-Meier survival analysis (most churn happens in the first ~100 days, and monthly plans retain fewer learners than annual plans) are in `churn_analysis.ipynb`.
+Learners who never churned are treated as observed for 365 days and then *censored* (still subscribed when follow-up ended). Kaplan-Meier estimates on the synthetic data show:
+
+- About **86% of churn happens within the first 100 days**, and 45% within the first 30 days
+- After 90 days, about **86% of annual-plan learners** are still subscribed versus **76% of monthly-plan learners**
+- Signup goal, occupation and discount separate the curves far less than plan type does
+
+The exploratory analysis and SHAP explanations are in `churn_analysis.ipynb`.
 
 ## Run it locally
 
@@ -91,13 +100,16 @@ churn_analysis.ipynb       Analysis notebook (EDA, SHAP, survival analysis)
 - The model is tuned for recall, so percentages run higher than real-world churn rates; use them to **rank** learners
 - Retention ROI uses assumed prices and success rates that the user can change
 - Lifetime value is simplified (price × months subscribed)
+- Survival curves assume non-churners were observed for 365 days
+- The what-if simulator shows what the model predicts, not a proven cause and effect
 
 ## Future work
 
 - Video-watching analytics (drop-off curves, playback speed)
-- Model performance page with an adjustable decision threshold
-- Time-based validation and probability calibration on real data
+- Cox proportional hazards model to estimate how each factor changes the *timing* of churn
+- Cross-validation, hyperparameter tuning and probability calibration
+- Time-based validation on real data
 
 ## Author
 
-**Shravya M S** · [GitHub](https://github.com/shravya-181)
+**Shravya Gowda** · [GitHub](https://github.com/shravya-181)
