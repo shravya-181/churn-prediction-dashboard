@@ -100,4 +100,4 @@ churn_analysis.ipynb       Analysis notebook (EDA, SHAP, survival analysis)
 
 ## Author
 
-**Shravya Gowda** · [GitHub](https://github.com/shravya-181)
+**Shravya M S** · [GitHub](https://github.com/shravya-181)
