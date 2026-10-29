@@ -113,4 +113,4 @@ requirements.txt           Python packages needed to run the app
 
 ## Author
 
-**Shravya Gowda** · [GitHub](https://github.com/shravya-181)
+**Shravya M S** · [GitHub](https://github.com/shravya-181)
