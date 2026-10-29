@@ -3,6 +3,7 @@
 An interactive dashboard that predicts which learners on a subscription learning platform (think Coursera, Udemy or Coding Ninjas) are likely to cancel, explains **why**, shows **when** they leave, and suggests **what to do about it**.
 
 🔗 **Live demo:** (https://edtech-churn-dashboard.streamlit.app/)
+
 > **Note:** the dataset is **synthetic** (3,000 generated learners). Real platforms do not publish customer data, so I designed behaviour rules based on realistic assumptions. The results show how the method works, not how a real company behaves.
 
 ## Screenshots
@@ -68,7 +69,7 @@ Learners who never churned are treated as observed for 365 days and then *censor
 - After 90 days, about **86% of annual-plan learners** are still subscribed versus **76% of monthly-plan learners**
 - Signup goal, occupation and discount separate the curves far less than plan type does
 
-The exploratory analysis and SHAP explanations are in `churn_analysis.ipynb`.
+The Kaplan-Meier curves are calculated inside the dashboard in plain pandas and numpy, so the app needs no extra library for survival analysis.
 
 ## Run it locally
 
@@ -91,7 +92,7 @@ model_columns.json         Model feature order
 cluster_columns.json       Persona feature order
 persona_info.json          Persona names and recommended actions
 edtech_churn_dataset.csv   Synthetic dataset
-churn_analysis.ipynb       Analysis notebook (EDA, SHAP, survival analysis)
+requirements.txt           Python packages needed to run the app
 ```
 
 ## Limitations
