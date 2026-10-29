@@ -196,7 +196,7 @@ st.sidebar.markdown(
 page = st.sidebar.radio(
     "Navigate",
     ["Start Here", "Overview", "Explore", "Predict", "Why?", "Model Performance",
-     "Retention Simulator", "Try Your Own Data"],
+     "Survival Curves", "Retention Simulator", "Try Your Own Data"],
 )
 
 currency_choice = st.sidebar.selectbox("Currency", ["₹ Indian Rupee", "$ US Dollar"])
@@ -360,6 +360,43 @@ def metrics_at(y_true, probs, t):
     f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
     return tp, fp, fn, tn, acc, prec, rec, f1
 
+# ---- Survival analysis helpers (Kaplan-Meier, written in plain pandas/numpy) ----
+OBSERVATION_DAYS = 365  # learners who never churned are followed for up to 365 days, then "censored"
+
+def kaplan_meier(durations, events, max_day=OBSERVATION_DAYS):
+    """Kaplan-Meier survival curve: for each day 0..max_day, the share of learners still subscribed.
+    durations = days until churn (or until the end of follow-up if they never churned)
+    events    = 1 if the learner churned, 0 if they were still subscribed at the end (censored)"""
+    d = pd.DataFrame({"t": np.asarray(durations, dtype=float), "e": np.asarray(events, dtype=int)})
+    n = len(d)
+    if n == 0:
+        return np.ones(max_day + 1)
+    all_at_t = d.groupby("t").size().sort_index()
+    churn_at_t = d[d["e"] == 1].groupby("t").size().reindex(all_at_t.index, fill_value=0)
+    at_risk = n - all_at_t.cumsum() + all_at_t          # learners still under observation at each time
+    surv = (1 - churn_at_t / at_risk).cumprod()          # chance of surviving each churn time, multiplied
+    days = np.arange(0, max_day + 1)
+    pos = np.searchsorted(surv.index.values, days, side="right") - 1
+    return np.where(pos < 0, 1.0, surv.values[np.maximum(pos, 0)])
+
+@st.cache_data
+def survival_curves(group_col):
+    """One curve per group (or a single curve for everyone). Returns a long table."""
+    work = df.copy()
+    work["duration"] = work["days_to_churn"].fillna(OBSERVATION_DAYS)
+    days = np.arange(0, OBSERVATION_DAYS + 1)
+    rows = []
+    if group_col is None:
+        groups = [("All learners", work)]
+    else:
+        groups = [(str(name), g) for name, g in work.groupby(group_col)]
+    for name, g in groups:
+        s = kaplan_meier(g["duration"], g["churned"])
+        rows.append(pd.DataFrame({
+            "Group": name, "Day": days, "Still subscribed (%)": s * 100, "Learners": len(g),
+        }))
+    return pd.concat(rows, ignore_index=True)
+
 hero("📚 EdTech Learner Churn Dashboard",
      "Predict who will leave, understand why, and know what to do about it, before they go.")
 
@@ -408,6 +445,7 @@ because real platforms do not publish their customer data. The patterns are real
         st.markdown(
             """
 - **Model Performance:** how good the model really is, and how the decision threshold trades missed leavers against false alarms
+- **Survival Curves:** *when* learners leave, and how long different groups stay subscribed
 - **Retention Simulator:** how much money a retention campaign could save, and a what-if tool for one learner
 - **Try Your Own Data:** upload a CSV of learners and get every learner's risk, reason and persona
             """
@@ -479,6 +517,17 @@ because real platforms do not publish their customer data. The patterns are real
             """
         )
 
+    with st.expander("Experiment 7: When do learners leave? (Survival Curves)"):
+        st.markdown(
+            """
+1. Open **Survival Curves** and compare **Plan type**. Which curve drops faster in the first 100 days?
+2. Move the **day** slider to *30*, then *90*, then *180*. How many learners are still subscribed in each group?
+3. Switch to **Signup goal** or **Signup discount**. Do those groups separate as clearly as the plans do?
+
+*What you learn:* churn is not only about *who* leaves but *when*. Early weeks are the danger zone.
+            """
+        )
+
     st.subheader("📖 Glossary")
     glossary = {
         "Churn": "When a learner cancels or stops renewing their subscription.",
@@ -491,6 +540,8 @@ because real platforms do not publish their customer data. The patterns are real
         "Recall": "Of all learners who really left, how many the model caught. We tuned the model to catch as many as possible.",
         "Precision": "Of all learners the model flagged, how many really would have left. Low precision means many false alarms.",
         "Decision threshold": "The risk level above which a learner is flagged. A lower threshold flags more learners: more leavers caught, but more false alarms.",
+        "Survival curve": "A line showing the share of learners still subscribed after each number of days. It only goes down, and a steeper drop means people leave faster.",
+        "Censoring": "Learners who had not left by the end of the study. We do not know when (or if) they will leave, so they count as 'still subscribed' instead of being thrown away.",
     }
     for term, meaning in glossary.items():
         with st.expander(term):
@@ -945,6 +996,109 @@ elif page == "Model Performance":
     st.caption(
         "Comparison numbers come from the training notebook, on the same 600 test learners. "
         "All results are on synthetic data, so real-world performance would differ."
+    )
+
+# ========================= SURVIVAL CURVES =========================
+elif page == "Survival Curves":
+    st.header("Survival curves: when do learners leave?")
+    st.info(
+        "How to read this: each line shows the share of learners still subscribed after a number of days. "
+        "A line that drops faster means that group leaves sooner."
+    )
+
+    survival_groups = {
+        "All learners": None,
+        "Plan type": "plan_type",
+        "Signup goal": "signup_goal",
+        "Occupation": "occupation_type",
+        "Used a signup discount": "signup_discount_used",
+    }
+    group_choice = st.selectbox("Compare curves by:", list(survival_groups.keys()), index=1)
+    curves = survival_curves(survival_groups[group_choice])
+    group_names = list(curves["Group"].drop_duplicates())
+
+    # ---------------- Part 1: the curves ----------------
+    st.subheader("1. Retention curves")
+    color_range = (["#6C5CE7"] if len(group_names) == 1
+                   else ["#E17055", "#6C5CE7", "#00B894", "#74B9FF"][:len(group_names)])
+    day_pick = st.slider("Check the share still subscribed after this many days", 0, OBSERVATION_DAYS, 90, 10)
+
+    curve_lines = (
+        alt.Chart(curves)
+        .mark_line(interpolate="step-after", strokeWidth=3)
+        .encode(
+            x=alt.X("Day:Q", title="Days since signup", scale=alt.Scale(domain=[0, OBSERVATION_DAYS])),
+            y=alt.Y("Still subscribed (%):Q", title="Still subscribed (%)", scale=alt.Scale(zero=False)),
+            color=alt.Color(
+                "Group:N",
+                scale=alt.Scale(domain=group_names, range=color_range),
+                legend=alt.Legend(title=None, orient="bottom"),
+            ),
+            tooltip=[alt.Tooltip("Group:N"), alt.Tooltip("Day:Q"),
+                     alt.Tooltip("Still subscribed (%):Q", format=".1f")],
+        )
+    )
+    day_marker = (
+        alt.Chart(pd.DataFrame({"Day": [int(day_pick)]}))
+        .mark_rule(color="#2D1B69", strokeDash=[5, 4], size=2)
+        .encode(x="Day:Q")
+    )
+    st.altair_chart((curve_lines + day_marker).properties(height=340), use_container_width=True)
+
+    # ---------------- Part 2: readout at the chosen day ----------------
+    st.subheader(f"2. Who is still subscribed after {day_pick} days?")
+    at_day = curves[curves["Day"] == day_pick].set_index("Group")
+    cols = st.columns(len(group_names))
+    for col, name in zip(cols, group_names):
+        col.metric(name, f"{at_day.loc[name, 'Still subscribed (%)']:.1f}%",
+                   help=f"{int(at_day.loc[name, 'Learners']):,} learners in this group")
+
+    if len(group_names) > 1:
+        best = at_day["Still subscribed (%)"].idxmax()
+        worst = at_day["Still subscribed (%)"].idxmin()
+        gap = at_day.loc[best, "Still subscribed (%)"] - at_day.loc[worst, "Still subscribed (%)"]
+        st.success(
+            f"Takeaway: after {day_pick} days, '{best}' learners are the most likely to still be subscribed "
+            f"({at_day.loc[best, 'Still subscribed (%)']:.1f}%), and '{worst}' the least "
+            f"({at_day.loc[worst, 'Still subscribed (%)']:.1f}%), a gap of {gap:.1f} points."
+        )
+    else:
+        st.success(
+            f"Takeaway: after {day_pick} days, about {at_day['Still subscribed (%)'].iloc[0]:.1f}% of all learners "
+            f"are still subscribed."
+        )
+
+    # ---------------- Part 3: when does the leaving happen? ----------------
+    st.divider()
+    st.subheader("3. When does most churn happen?")
+    churners = df[df["churned"] == 1]["days_to_churn"]
+    bands = pd.cut(
+        churners,
+        bins=[0, 30, 60, 100, 180, OBSERVATION_DAYS],
+        labels=["Days 1-30", "Days 31-60", "Days 61-100", "Days 101-180", "Days 181-365"],
+    )
+    band_share = (bands.value_counts(normalize=True).reindex(bands.cat.categories) * 100)
+    pretty_bar(band_share, "Share of all churners (%)", colors=["#E17055", "#6C5CE7"])
+    first_100 = band_share.iloc[:3].sum()
+    st.success(
+        f"Takeaway: {first_100:.0f}% of the learners who churn do so within their first 100 days. "
+        f"That is the window where retention effort should go first."
+    )
+
+    with st.expander("How is this calculated? (Kaplan-Meier, in plain English)"):
+        st.markdown(
+            f"""
+- Every learner has a **duration**: the days until they churned. Learners who never churned have no churn day, so they are
+  followed for **{OBSERVATION_DAYS} days** and then marked as **censored** (still subscribed when we stopped watching).
+- On each day that someone churns, the curve multiplies by *(1 minus churners that day divided by learners still in the study)*.
+- Censored learners stay in the calculation until the end, so we do not pretend they left and we do not throw them away.
+- This is the **Kaplan-Meier estimator**, the standard tool for "how long until an event happens" questions. It is written here in plain pandas and numpy.
+            """
+        )
+
+    st.caption(
+        "Assumption: learners who did not churn are treated as observed for 365 days. The data is synthetic, so the shape of "
+        "the curves shows how the method works, not how a real company behaves. Curves describe groups, not single learners."
     )
 
 # ======================= RETENTION SIMULATOR =======================
