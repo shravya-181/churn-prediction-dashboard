@@ -361,9 +361,11 @@ def metrics_at(y_true, probs, t):
     return tp, fp, fn, tn, acc, prec, rec, f1
 
 # ---- Survival analysis helpers (Kaplan-Meier, written in plain pandas/numpy) ----
-OBSERVATION_DAYS = 365  # learners who never churned are followed for up to 365 days, then "censored"
+# Same setup as the notebook: churned learners use days_to_churn; learners who never churned are
+# "censored" at tenure_months x 30 days (how long we have watched them so far).
+SURVIVAL_MAX_DAY = int(max(df["days_to_churn"].max(), df["tenure_months"].max() * 30))
 
-def kaplan_meier(durations, events, max_day=OBSERVATION_DAYS):
+def kaplan_meier(durations, events, max_day=SURVIVAL_MAX_DAY):
     """Kaplan-Meier survival curve: for each day 0..max_day, the share of learners still subscribed.
     durations = days until churn (or until the end of follow-up if they never churned)
     events    = 1 if the learner churned, 0 if they were still subscribed at the end (censored)"""
@@ -383,8 +385,8 @@ def kaplan_meier(durations, events, max_day=OBSERVATION_DAYS):
 def survival_curves(group_col):
     """One curve per group (or a single curve for everyone). Returns a long table."""
     work = df.copy()
-    work["duration"] = work["days_to_churn"].fillna(OBSERVATION_DAYS)
-    days = np.arange(0, OBSERVATION_DAYS + 1)
+    work["duration"] = np.where(work["churned"] == 1, work["days_to_churn"], work["tenure_months"] * 30)
+    days = np.arange(0, SURVIVAL_MAX_DAY + 1)
     rows = []
     if group_col is None:
         groups = [("All learners", work)]
@@ -1021,13 +1023,13 @@ elif page == "Survival Curves":
     st.subheader("1. Retention curves")
     color_range = (["#6C5CE7"] if len(group_names) == 1
                    else ["#E17055", "#6C5CE7", "#00B894", "#74B9FF"][:len(group_names)])
-    day_pick = st.slider("Check the share still subscribed after this many days", 0, OBSERVATION_DAYS, 90, 10)
+    day_pick = st.slider("Check the share still subscribed after this many days", 0, SURVIVAL_MAX_DAY, 90, 10)
 
     curve_lines = (
         alt.Chart(curves)
         .mark_line(interpolate="step-after", strokeWidth=3)
         .encode(
-            x=alt.X("Day:Q", title="Days since signup", scale=alt.Scale(domain=[0, OBSERVATION_DAYS])),
+            x=alt.X("Day:Q", title="Days since signup", scale=alt.Scale(domain=[0, SURVIVAL_MAX_DAY])),
             y=alt.Y("Still subscribed (%):Q", title="Still subscribed (%)", scale=alt.Scale(zero=False)),
             color=alt.Color(
                 "Group:N",
@@ -1074,7 +1076,7 @@ elif page == "Survival Curves":
     churners = df[df["churned"] == 1]["days_to_churn"]
     bands = pd.cut(
         churners,
-        bins=[0, 30, 60, 100, 180, OBSERVATION_DAYS],
+        bins=[0, 30, 60, 100, 180, max(365, int(churners.max()))],
         labels=["Days 1-30", "Days 31-60", "Days 61-100", "Days 101-180", "Days 181-365"],
     )
     band_share = (bands.value_counts(normalize=True).reindex(bands.cat.categories) * 100)
@@ -1088,8 +1090,9 @@ elif page == "Survival Curves":
     with st.expander("How is this calculated? (Kaplan-Meier, in plain English)"):
         st.markdown(
             f"""
-- Every learner has a **duration**: the days until they churned. Learners who never churned have no churn day, so they are
-  followed for **{OBSERVATION_DAYS} days** and then marked as **censored** (still subscribed when we stopped watching).
+- Every learner has a **duration**: the days until they churned. Learners who never churned have no churn day, so their
+  duration is how long we have watched them (**months subscribed x 30 days**), and they are marked as **censored**
+  (still subscribed when we stopped watching).
 - On each day that someone churns, the curve multiplies by *(1 minus churners that day divided by learners still in the study)*.
 - Censored learners stay in the calculation until the end, so we do not pretend they left and we do not throw them away.
 - This is the **Kaplan-Meier estimator**, the standard tool for "how long until an event happens" questions. It is written here in plain pandas and numpy.
@@ -1097,7 +1100,7 @@ elif page == "Survival Curves":
         )
 
     st.caption(
-        "Assumption: learners who did not churn are treated as observed for 365 days. The data is synthetic, so the shape of "
+        "Assumption: learners who did not churn are observed for months subscribed x 30 days. The data is synthetic, so the shape of "
         "the curves shows how the method works, not how a real company behaves. Curves describe groups, not single learners."
     )
 
