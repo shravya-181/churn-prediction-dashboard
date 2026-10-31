@@ -2,7 +2,7 @@
 
 An interactive dashboard that predicts which learners on a subscription learning platform (think Coursera, Udemy or Coding Ninjas) are likely to cancel, explains **why**, shows **when** they leave, and suggests **what to do about it**.
 
-🔗 **Live demo:** (https://edtech-churn-dashboard.streamlit.app/)
+🔗 **Live demo:** [your-app-link-here](https://your-app-link-here)
 
 > **Note:** the dataset is **synthetic** (3,000 generated learners). Real platforms do not publish customer data, so I designed behaviour rules based on realistic assumptions. The results show how the method works, not how a real company behaves.
 
@@ -63,13 +63,13 @@ Evaluated on a held-out test set of 600 learners (80/20 stratified split):
 
 ## Survival analysis
 
-Learners who never churned are treated as observed for 365 days and then *censored* (still subscribed when follow-up ended). Kaplan-Meier estimates on the synthetic data show:
+Learners who never churned are *censored* at their months subscribed × 30 days (how long we have watched them so far), the same setup as in my analysis notebook. Kaplan-Meier estimates on the synthetic data show:
 
 - About **86% of churn happens within the first 100 days**, and 45% within the first 30 days
-- After 90 days, about **86% of annual-plan learners** are still subscribed versus **76% of monthly-plan learners**
+- After 90 days, about **83% of annual-plan learners** are still subscribed versus **72% of monthly-plan learners**
 - Signup goal, occupation and discount separate the curves far less than plan type does
 
-The Kaplan-Meier curves are calculated inside the dashboard in plain pandas and numpy, so the app needs no extra library for survival analysis.
+The notebook uses the `lifelines` library. The dashboard recalculates the same curves in plain pandas and numpy (the results match `lifelines`), so the app needs no extra library for survival analysis.
 
 ## Run it locally
 
@@ -101,7 +101,7 @@ requirements.txt           Python packages needed to run the app
 - The model is tuned for recall, so percentages run higher than real-world churn rates; use them to **rank** learners
 - Retention ROI uses assumed prices and success rates that the user can change
 - Lifetime value is simplified (price × months subscribed)
-- Survival curves assume non-churners were observed for 365 days
+- Survival curves treat each non-churner as observed for months subscribed × 30 days, so very short tenures add little information
 - The what-if simulator shows what the model predicts, not a proven cause and effect
 
 ## Future work
@@ -113,4 +113,4 @@ requirements.txt           Python packages needed to run the app
 
 ## Author
 
-**Shravya M S** · [GitHub](https://github.com/shravya-181)
+**Shravya Gowda** · [GitHub](https://github.com/shravya-181)
